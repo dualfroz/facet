@@ -1,0 +1,15 @@
+# runtime data stores
+*.pstore
+*.sqlite3
+
+# bundler / dependencies
+.bundle/
+vendor/bundle/
+
+# temp / logs
+tmp/
+*.log
+
+# os / editor / env
+.DS_Store
+.env
