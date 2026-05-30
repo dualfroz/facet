@@ -1029,6 +1029,179 @@ Net::HTTP.start('127.0.0.1', port) do |http|
 
   compressed_export = http.get('/posts/export', gzip_headers)
   raise "expected GET /posts/export to succeed, got #{compressed_export.code}" unless compressed_export.code == '200'
+  raise 'expected chunked Transfer-Encoding and gzip Content-Encoding to compose on the streamed export' \
+    unless compressed_export['transfer-encoding'] == 'chunked' && compressed_export['content-encoding'] == 'gzip'
+  raise 'a chunked response must still never carry a Content-Length, gzipped or not' if compressed_export['content-length']
+  decompressed_export = Zlib::GzipReader.new(StringIO.new(compressed_export.body)).read
+  raise 'gzipping a StreamingBody chunk-by-chunk must reproduce byte-for-byte the same CSV as the uncompressed export' \
+    unless decompressed_export == export_response.body
+  puts '  GET /posts/export (Accept-Encoding: gzip) -> chunked + gzip together, decompresses to the exact same CSV'
+
+  small_json_probe = http.get('/assets/manifest.json', gzip_headers)
+  raise "expected GET /assets/manifest.json to succeed, got #{small_json_probe.code}" unless small_json_probe.code == '200'
+  raise 'expected a tiny response body to be left alone (below the compression threshold)' if small_json_probe['content-encoding']
+  puts "  GET /assets/manifest.json (Accept-Encoding: gzip) -> #{small_json_probe.code}, no Content-Encoding " \
+       "(#{small_json_probe.body.bytesize} bytes, below the size threshold)"
+
+  puts '-' * 40
+  puts 'draining the background job queue (NotificationMailer.deliver_later from the post#create above)'
+  worker = Prism::Jobs::Worker.new(Prism::Jobs.default_queue)
+  processed = worker.work_off
+  puts "worker processed #{processed} job(s); Prism::Mailer.deliveries=#{Prism::Mailer.deliveries.size}"
+  raise 'expected the new-post notification email to have been delivered' if Prism::Mailer.deliveries.empty?
+  puts "last delivery subject: #{Prism::Mailer.deliveries.last.subject}"
+
+  preview_index = http.get('/rails/mailers')
+  puts "GET /rails/mailers -> #{preview_index.code}"
+  raise 'mailer preview index did not list notification_mailer' unless preview_index.body.include?('notification_mailer')
+
+  preview_email = http.get('/rails/mailers/notification_mailer/new_post')
+  puts "GET /rails/mailers/notification_mailer/new_post -> #{preview_email.code}"
+  unless preview_email.body.include?('New post:')
+    raise 'mailer preview did not render the new_post email subject'
+  end
+
+  puts '-' * 40
+  puts 'checking POST /posts/import (Post.import_csv) - the CSV counterpart of GET /posts/export above, and the ' \
+       "only place in this app where Post.create_with_unique_slug's per-row transaction(requires_new: true) " \
+       'savepoint actually matters (import_csv wraps the whole batch in one outer Post.transaction, so a plain ' \
+       'nested transaction per row would either roll back rows already imported earlier in the same batch, or ' \
+       'leave a doomed row enlisted to wrongly fire its after_commit notification once the batch commits)'
+  import_csv_body = CSV.generate do |csv|
+    csv << %w[title body]
+    csv << ['Bulk Import Special Report', 'First half of a two-part report.']
+    csv << ['Bulk Import Special Report',
+            'Second half, same title on purpose - this row must collide on the ' \
+            'first-choice slug (a REAL Store::UniqueConstraintViolation from the unique index on posts.slug, ' \
+            'not a mocked one) and retry with a numeric suffix.']
+    csv << ['', 'This row has no title and must be skipped without aborting the rows around it.']
+    csv << ['Another Imported Post', 'A normal row after the skipped one, proving the batch keeps going.']
+  end
+  posts_before_import = Post.count
+  deliveries_before_import = Prism::Mailer.deliveries.size
+
+  import_boundary = '----PrismBlogDemoImportBoundary'
+  import_body = multipart_body(
+    import_boundary,
+    fields: { 'authenticity_token' => token },
+    files: { 'file' => ['posts.csv', 'text/csv', import_csv_body] }
+  )
+  import_response = http.post(
+    '/posts/import', import_body,
+    'Content-Type' => "multipart/form-data; boundary=#{import_boundary}", 'Cookie' => cookie
+  )
+  puts "POST /posts/import (multipart CSV: 2 unique rows + 1 duplicate-titled row + 1 blank-titled row) -> " \
+       "#{import_response.code} Location=#{import_response['location']}"
+  raise "expected the import to redirect back to /posts, got #{import_response.code}" unless import_response.code == '302'
+  import_cookie = cookie_from(import_response)
+  cookie = import_cookie unless import_cookie.empty?
+
+  imported_count = Post.count - posts_before_import
+  raise "expected exactly 3 new posts (2 unique-titled rows + 1 retried duplicate), got #{imported_count}" unless imported_count == 3
+
+  special_report = Post.where(title: 'Bulk Import Special Report').order(:id, :asc).to_a
+  raise 'expected both duplicate-titled rows to have been imported' unless special_report.size == 2
+  unless special_report.first.slug == 'bulk-import-special-report'
+    raise "expected the first row's slug to be the plain, unsuffixed base, got #{special_report.first.slug.inspect}"
+  end
+  unless special_report.last.slug == 'bulk-import-special-report-2'
+    raise "expected the second row's real unique-index collision to have been retried with a numeric suffix, " \
+          "got #{special_report.last.slug.inspect}"
+  end
+  puts "  both duplicate-titled rows imported: slugs #{special_report.map(&:slug).inspect} " \
+       '(a real Store::UniqueConstraintViolation retried via transaction(requires_new: true), not a mocked collision)'
+
+  another = Post.find_by(title: 'Another Imported Post')
+  raise 'expected the row after the skipped blank-titled one to have been imported too' unless another
+  puts "  row after the skipped blank-titled row was still imported (slug=#{another.slug.inspect}) - " \
+       "Post.import_csv's outer transaction survived the skip instead of losing the whole batch"
+
+  import_worker = Prism::Jobs::Worker.new(Prism::Jobs.default_queue)
+  import_processed = import_worker.work_off
+  new_deliveries = Prism::Mailer.deliveries.size - deliveries_before_import
+  puts "worker processed #{import_processed} job(s) from the import; #{new_deliveries} new notification email(s)"
+  unless new_deliveries == 3
+    raise "expected exactly 3 new notification emails (one per actually-imported post, none for the skipped " \
+          "blank-titled row or for either retry attempt on the duplicate title), got #{new_deliveries}"
+  end
+
+  puts '-' * 40
+  puts 'reserved-slug check: a post titled the same as a collection route (Post.reserved_slugs, derived ' \
+       "from Blog.router itself) must not steal that route's URL - a plain title-derived slug 'trash' would " \
+       'otherwise be permanently unreachable at its own /posts/trash show page, since Application.resources ' \
+       'registers the literal GET /posts/trash collection route before the generic GET /posts/:slug show route ' \
+       'it would shadow'
+  raise 'Post.reserved_slugs should include both collection routes registered under /posts' \
+    unless (%w[trash export] - Post.reserved_slugs).empty?
+
+  reserved_title_body = URI.encode_www_form(
+    'post[title]' => 'Trash', 'post[body]' => 'This title collides with the /posts/trash collection route.',
+    'authenticity_token' => token
+  )
+  reserved_title_create = http.post('/posts', reserved_title_body,
+                                     'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  reserved_post_path = reserved_title_create['location']
+  puts "POST /posts (title 'Trash') -> #{reserved_title_create.code} Location=#{reserved_post_path}"
+  raise "expected a redirect to the new post, got #{reserved_title_create.code}" unless reserved_title_create.code == '302'
+  reserved_post_cookie = cookie_from(reserved_title_create)
+  cookie = reserved_post_cookie unless reserved_post_cookie.empty?
+
+  reserved_slug = reserved_post_path.split('/').last
+  raise "expected the base slug 'trash' to have been skipped in favor of a numeric suffix, got #{reserved_slug.inspect}" \
+    if reserved_slug == 'trash'
+  puts "  title 'Trash' -> slug #{reserved_slug.inspect} (base 'trash' skipped - it's a reserved collection route)"
+
+  reserved_post_show = http.get(reserved_post_path, 'Cookie' => cookie)
+  raise "expected GET #{reserved_post_path} to render the post's own show page" \
+    unless reserved_post_show.code == '200' && reserved_post_show.body.include?('class="status"')
+  puts "  GET #{reserved_post_path} -> #{reserved_post_show.code}, renders the post's own show page (not the trash listing)"
+
+  trash_listing = http.get('/posts/trash', 'Cookie' => cookie)
+  # trash.erb never renders class="status" (that markup is show.erb-only,
+  # see the reserved_post_show assertion above) whether or not the current
+  # user's trash is empty right now - a content check that would only work
+  # while it happens to be non-empty (e.g. looking for the trash <ul>)
+  # would be an accident of demo ordering, not a real proof this is the
+  # listing and not the post titled "Trash".
+  raise "expected GET /posts/trash to still resolve to the trash LISTING (not the post titled 'Trash')" \
+    unless trash_listing.code == '200' && !trash_listing.body.include?('class="status"')
+  puts "  GET /posts/trash -> #{trash_listing.code}, still the trash listing page, untouched by the reserved slug"
+
+  puts '-' * 40
+  puts 'featured flag check: Prism::Orm::Attributes/TypeCasting - the "featured" checkbox posts a String ' \
+       '("1"/"0") like every HTML form field does, cast into a real TrueClass/FalseClass on write (Post#featured, ' \
+       'see the model) so Post.featured (where(featured: true)) and the ?featured=1 index filter can actually ' \
+       'match it - a raw uncast "1" string would never equal the Boolean true a plain `==` query compares against.'
+
+  featured_body = URI.encode_www_form(
+    'post[title]' => 'Featured launch announcement', 'post[body]' => 'This one should show up in the featured filter.',
+    'post[featured]' => '1', 'authenticity_token' => token
+  )
+  featured_create = http.post('/posts', featured_body,
+                               'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  featured_post_path = featured_create['location']
+  puts "POST /posts (post[featured]=1) -> #{featured_create.code} Location=#{featured_post_path}"
+  raise "expected a redirect to the new post, got #{featured_create.code}" unless featured_create.code == '302'
+  featured_cookie = cookie_from(featured_create)
+  cookie = featured_cookie unless featured_cookie.empty?
+
+  featured_slug = featured_post_path.split('/').last
+  featured_post = Post.find_by!(slug: featured_slug)
+  unless featured_post.featured == true && featured_post.featured.is_a?(TrueClass)
+    raise "expected Post#featured to be a real Boolean true, got #{featured_post.featured.inspect} (#{featured_post.featured.class})"
+  end
+  puts "  Post.find_by!(slug: #{featured_slug.inspect}).featured -> #{featured_post.featured.inspect} " \
+       "(#{featured_post.featured.class}, not the raw \"1\" string the form submitted)"
+
+  plain_body = URI.encode_www_form(
+    'post[title]' => 'Ordinary, not featured', 'post[body]' => 'Should be absent from the featured filter.',
+    'post[featured]' => '0', 'authenticity_token' => token
+  )
+  plain_create = http.post('/posts', plain_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected a redirect to the new post, got #{plain_create.code}" unless plain_create.code == '302'
+  plain_cookie = cookie_from(plain_create)
+  cookie = plain_cookie unless plain_cookie.empty?
+  plain_slug = plain_create['location'].split('/').last
 end
 
 server.stop
