@@ -1202,6 +1202,179 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   plain_cookie = cookie_from(plain_create)
   cookie = plain_cookie unless plain_cookie.empty?
   plain_slug = plain_create['location'].split('/').last
+
+  featured_filter = http.get('/posts?featured=1', 'Cookie' => cookie)
+  raise "expected GET /posts?featured=1 to succeed, got #{featured_filter.code}" unless featured_filter.code == '200'
+  raise 'expected the featured post to appear in the ?featured=1 filter' \
+    unless featured_filter.body.include?("id=\"post-#{featured_slug}\"")
+  raise 'expected the non-featured post to be ABSENT from the ?featured=1 filter' \
+    if featured_filter.body.include?("id=\"post-#{plain_slug}\"")
+  raise 'expected the featured badge to render for the featured post' unless featured_filter.body.include?('featured-badge')
+  puts "  GET /posts?featured=1 -> #{featured_filter.code}, includes the featured post, excludes the plain one " \
+       '(Post.featured scope -> where(featured: true) matched a real Boolean, not a full-scan string comparison)'
+
+  queried_featured = Post.where(featured: true).to_a
+  raise "expected exactly the one featured post created above, got #{queried_featured.map(&:slug).inspect}" \
+    unless queried_featured.map(&:slug) == [featured_slug]
+  puts "  Post.where(featured: true) -> #{queried_featured.map(&:slug).inspect} (ORM query engine, not just the controller filter)"
+
+  puts '-' * 40
+  puts 'Post#acts_as_list (scoped by featured, see the model) - editors reorder the featured shelf with ' \
+       '#move_up/#move_down (PostsController) instead of it always sorting by recency'
+  second_featured_body = URI.encode_www_form(
+    'post[title]' => 'Second featured pick', 'post[body]' => 'Also curated onto the shelf.',
+    'post[featured]' => '1', 'authenticity_token' => token
+  )
+  second_featured_create = http.post('/posts', second_featured_body,
+                                      'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected a redirect to the new post, got #{second_featured_create.code}" unless second_featured_create.code == '302'
+  second_featured_cookie = cookie_from(second_featured_create)
+  cookie = second_featured_cookie unless second_featured_cookie.empty?
+  second_featured_slug = second_featured_create['location'].split('/').last
+
+  third_featured_body = URI.encode_www_form(
+    'post[title]' => 'Third featured pick', 'post[body]' => 'Bottom of the shelf for now.',
+    'post[featured]' => '1', 'authenticity_token' => token
+  )
+  third_featured_create = http.post('/posts', third_featured_body,
+                                     'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected a redirect to the new post, got #{third_featured_create.code}" unless third_featured_create.code == '302'
+  third_featured_cookie = cookie_from(third_featured_create)
+  cookie = third_featured_cookie unless third_featured_cookie.empty?
+  third_featured_slug = third_featured_create['location'].split('/').last
+
+  shelf_before = http.get('/posts?featured=1', 'Cookie' => cookie)
+  order_before = [featured_slug, second_featured_slug, third_featured_slug].select { |slug| shelf_before.body.index("id=\"post-#{slug}\"") }
+                                                                            .sort_by { |slug| shelf_before.body.index("id=\"post-#{slug}\"") }
+  raise "expected the shelf in creation order, got #{order_before.inspect}" \
+    unless order_before == [featured_slug, second_featured_slug, third_featured_slug]
+  etag_before_reorder = shelf_before['etag']
+  puts "  GET /posts?featured=1 -> shelf order #{order_before.inspect} (creation order, ETag #{etag_before_reorder})"
+
+  move_down_log_offset = File.size(log_path)
+  move_down_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  move_down = http.post("/posts/#{featured_slug}/move_down", move_down_body,
+                         'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST /posts/#{featured_slug}/move_down with _method=PATCH -> #{move_down.code} Location=#{move_down['location']}"
+  raise "expected the move_down action to redirect, got #{move_down.code}" unless move_down.code == '302'
+  raise 'expected move_down to redirect back to the featured shelf' unless move_down['location'].end_with?('?featured=1')
+  move_down_cookie = cookie_from(move_down)
+  cookie = move_down_cookie unless move_down_cookie.empty?
+
+  # Post#move_lower (lib/prism/orm/list_position.rb#lower_item) queries
+  # list_scope_relation.where(position: { gt: pos }) - list_scope_relation
+  # is already narrowed by .where(featured: true), so this is exactly an
+  # equality-prefix-plus-range condition. Before the composite
+  # [featured, position] index (db/migrate/20260908000001_...), Store had
+  # no way to answer that without either a full scan or, at best, a plain
+  # range index on position alone that would have ignored the featured
+  # filter and returned candidates from BOTH shelves for Relation#rows to
+  # re-filter in memory - checking the real log line here proves the
+  # composite index (not just the synthetic CountingIndexStore fixtures in
+  # test/test_orm_index.rb) is what a real scoped reorder actually hits.
+  move_down_log_lines = File.read(log_path)[move_down_log_offset..].to_s
+  unless move_down_log_lines.include?('operation="SELECT INDEX RANGE"') && move_down_log_lines.include?('table="posts"')
+    raise 'expected Post#move_lower (scoped by featured) to hit the composite posts index instead of a full table scan'
+  end
+  unless move_down_log_lines.include?('columns=["featured", "position"]')
+    raise 'expected the composite index lookup to be reported as covering featured and position together'
+  end
+  puts '  POST .../move_down -> sql.prism log shows operation="SELECT INDEX RANGE" table="posts" ' \
+       'columns=["featured", "position"] - the scoped acts_as_list neighbor lookup used the composite index, zero full scan'
+
+  # The old ETag must NOT satisfy If-None-Match anymore - see the etag
+  # components fix in PostsController#index (position now rides along).
+  # A stale 304 here would mean the shelf visibly reordered on the very
+  # next real GET but a conditional client kept showing the old order.
+  stale_conditional = http.get('/posts?featured=1', 'Cookie' => cookie, 'If-None-Match' => etag_before_reorder)
+  raise "expected the reorder to invalidate the old ETag (200, not 304), got #{stale_conditional.code}" \
+    unless stale_conditional.code == '200'
+
+  shelf_after = http.get('/posts?featured=1', 'Cookie' => cookie)
+  order_after = [featured_slug, second_featured_slug, third_featured_slug].sort_by { |slug| shelf_after.body.index("id=\"post-#{slug}\"") }
+  raise "expected #{featured_slug} to swap with #{second_featured_slug}, got #{order_after.inspect}" \
+    unless order_after == [second_featured_slug, featured_slug, third_featured_slug]
+  puts "  #{etag_before_reorder} rejected with a fresh 200 after the reorder, new shelf order #{order_after.inspect} " \
+       "(#{featured_slug} swapped down with #{second_featured_slug}, #{third_featured_slug} untouched)"
+
+  reordered_positions = Post.where(slug: [featured_slug, second_featured_slug, third_featured_slug]).to_a
+                             .sort_by(&:position).map(&:slug)
+  raise "expected the ORM's own position column to agree with the rendered order, got #{reordered_positions.inspect}" \
+    unless reordered_positions == order_after
+  puts "  Post.where(...).sort_by(&:position) -> #{reordered_positions.inspect} (ORM position column, not just markup order)"
+
+  # The shelf leader has nothing above it - PostsController#move_up still
+  # accepts the request, but Post#move_higher (see lib/prism/orm/list_position.rb)
+  # is a documented no-op with nobody to swap with, through a real HTTP
+  # round trip rather than only the unit test's in-process call.
+  noop_move_up_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  noop_move_up = http.post("/posts/#{second_featured_slug}/move_up", noop_move_up_body,
+                            'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the move_up action to redirect, got #{noop_move_up.code}" unless noop_move_up.code == '302'
+  noop_move_up_cookie = cookie_from(noop_move_up)
+  cookie = noop_move_up_cookie unless noop_move_up_cookie.empty?
+  shelf_still = http.get('/posts?featured=1', 'Cookie' => cookie)
+  order_still = [featured_slug, second_featured_slug, third_featured_slug].sort_by { |slug| shelf_still.body.index("id=\"post-#{slug}\"") }
+  raise "expected move_up on the shelf leader to be a no-op, got #{order_still.inspect}" unless order_still == order_after
+  puts "  POST /posts/#{second_featured_slug}/move_up (already first) -> order unchanged, #{order_still.inspect}"
+
+  puts '-' * 40
+  puts "ownership check: a second user may not delete somebody else's post"
+  other_signup_body = URI.encode_www_form(
+    'user[email]' => 'reader2@example.com', 'user[password]' => 'another passphrase',
+    'user[password_confirmation]' => 'another passphrase', 'authenticity_token' => token
+  )
+  # .json instead of the usual form post here doubles as the demo of
+  # UsersController#create's JSON branch: sign_in (and so the Set-Cookie
+  # this scenario depends on to become "reader2" below) happens exactly
+  # the same regardless of format, only the response body/status differ.
+  other_signup = http.post('/users.json', other_signup_body,
+                            'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the JSON sign-up to return 201, got #{other_signup.code}" unless other_signup.code == '201'
+  other_signup_json = JSON.parse(other_signup.body)
+  raise 'JSON sign-up response should carry the new user id/email' unless other_signup_json['email'] == 'reader2@example.com' && other_signup_json['id']
+  raise 'JSON sign-up response must never leak password_digest' if other_signup_json.key?('password_digest')
+  puts "POST /users.json (sign up) -> #{other_signup.code}, id=#{other_signup_json['id']}, no password_digest in the body"
+  fresh_cookie = cookie_from(other_signup)
+  cookie = fresh_cookie unless fresh_cookie.empty?
+
+  puts 'draining the background job queue again (User after_commit(on: :create) now also queues a welcome email ' \
+       'AND a confirmation-instructions email - two separate after_commit(on: :create) hooks, see User)'
+  deliveries_before_welcome = Prism::Mailer.deliveries.size
+  processed_after_signup = worker.work_off
+  puts "worker processed #{processed_after_signup} job(s); Prism::Mailer.deliveries=#{Prism::Mailer.deliveries.size}"
+  raise 'expected new emails to have been delivered' unless Prism::Mailer.deliveries.size > deliveries_before_welcome
+  # A handful of OTHER posts were created since the last drain (each queues
+  # its own new_post notification to editors@example.com), so this batch is
+  # not just reader2's 2 signup emails - filter down to reader2's own mail
+  # rather than assuming an exact count or a fixed position among them.
+  new_deliveries_after_signup = Prism::Mailer.deliveries[deliveries_before_welcome..].select { |d| d.to == ['reader2@example.com'] }
+  raise "expected exactly 2 emails to reader2 (welcome + confirmation instructions), got #{new_deliveries_after_signup.map(&:subject)}" \
+    unless new_deliveries_after_signup.size == 2
+  welcome_delivery = new_deliveries_after_signup.find { |d| d.subject.include?('Welcome') }
+  confirmation_delivery = new_deliveries_after_signup.find { |d| d.subject.include?('Confirm your') }
+  raise 'expected a welcome email among the 2 just delivered to reader2' unless welcome_delivery
+  raise 'expected a confirmation-instructions email among the 2 just delivered to reader2' unless confirmation_delivery
+  puts "delivery: to=#{welcome_delivery.to.first} subject=#{welcome_delivery.subject.inspect}"
+  puts "delivery: to=#{confirmation_delivery.to.first} subject=#{confirmation_delivery.subject.inspect}"
+
+  welcome_preview = http.get('/rails/mailers/notification_mailer/welcome')
+  puts "GET /rails/mailers/notification_mailer/welcome -> #{welcome_preview.code}"
+  raise 'welcome mailer preview did not render the welcome subject' unless welcome_preview.body.include?('Welcome to Prism Blog')
+
+  forbidden_delete_body = URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token)
+  forbidden_attempt = http.post(post_path, forbidden_delete_body,
+                                 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{post_path} with _method=DELETE as a DIFFERENT user -> #{forbidden_attempt.code} " \
+       "Location=#{forbidden_attempt['location']}"
+  unless forbidden_attempt.code == '302' && forbidden_attempt['location'] == post_path
+    raise "expected the second user's delete attempt to be redirected back to the post, got " \
+          "#{forbidden_attempt.code} Location=#{forbidden_attempt['location']}"
+  end
+
+  forbidden_edit_page = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  puts "GET #{post_path}/edit as a DIFFERENT user -> #{forbidden_edit_page.code} Location=#{forbidden_edit_page['location']}"
+  unless forbidden_edit_page.code == '302' && forbidden_edit_page['location'] == post_path
 end
 
 server.stop
