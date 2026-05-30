@@ -1,0 +1,21 @@
+<h1>Blog</h1>
+<% if notice %>
+<p class="notice"><%= notice %></p>
+<% end %>
+<% unless errors.empty? %>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+<form method="post" action="/posts">
+  <input type="text" name="title" placeholder="Title">
+  <textarea name="body" placeholder="Body"></textarea>
+  <button type="submit">Create post</button>
+</form>
+<ul class="posts">
+<% posts.each do |post| %>
+<%== partial('post', locals: { post: post }) %>
+<% end %>
+</ul>

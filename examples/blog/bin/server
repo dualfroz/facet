@@ -1,0 +1,6 @@
+require_relative '../app'
+
+server = Prism::Server.new(Blog, port: (ARGV[0] || 3000).to_i).start
+puts "listening on #{server.url}"
+trap('INT') { server.stop; exit }
+sleep
