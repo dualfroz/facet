@@ -510,6 +510,352 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   )
   json_create = http.post('/posts.json', json_create_body,
                            'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected creating a post via .json to return 201, got #{json_create.code}" unless json_create.code == '201'
+  created_via_json = JSON.parse(json_create.body)
+  json_post_id = created_via_json['id']
+  # posts#create/#index/#update .json bodies now carry `slug` alongside
+  # `id` (see PostsController) - a JSON client has no other way to build
+  # a valid /posts/:slug URL for a post it just created, now that show/
+  # update/destroy are slug-keyed (see app.rb's `param: :slug`).
+  json_post_slug = created_via_json['slug']
+  raise 'json create response should echo the saved title' unless created_via_json['title'] == 'JSON API post'
+  raise 'json create response should carry the generated slug' if json_post_slug.to_s.empty?
+  puts "POST /posts.json -> #{json_create.code}, created post #{json_post_id} as a JSON payload (no redirect)"
+
+  json_create_cookie = cookie_from(json_create)
+  cookie = json_create_cookie unless json_create_cookie.empty?
+
+  invalid_json_create_body = URI.encode_www_form(
+    'post[title]' => '', 'post[body]' => '', 'authenticity_token' => token
+  )
+  invalid_json_create = http.post('/posts.json', invalid_json_create_body,
+                                   'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless invalid_json_create.code == '422'
+    raise "expected a blank title via .json to fail with 422, got #{invalid_json_create.code}"
+  end
+  invalid_create_errors = JSON.parse(invalid_json_create.body)['errors']
+  unless invalid_create_errors.is_a?(Array) && invalid_create_errors.any? { |e| e['source']['pointer'] == '/data/attributes/title' }
+    raise "expected a JSON:API error object pointing at /data/attributes/title, got #{invalid_json_create.body}"
+  end
+  raise 'every JSON:API error object should carry the response status as a string' unless invalid_create_errors.all? { |e| e['status'] == '422' }
+  puts "POST /posts.json with a blank title -> #{invalid_json_create.code}, " \
+       "errors[0].source.pointer=#{invalid_create_errors.first['source']['pointer']}"
+
+  json_update_body = URI.encode_www_form(
+    'post[title]' => 'JSON API post (edited)', 'post[body]' => 'Updated via the .json format.',
+    'post[lock_version]' => '0', '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  json_update = http.post("/posts/#{json_post_slug}.json", json_update_body,
+                           'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected updating a post via .json to return 200, got #{json_update.code}" unless json_update.code == '200'
+  updated_via_json = JSON.parse(json_update.body)
+  raise 'json update response should reflect the new title' unless updated_via_json['title'] == 'JSON API post (edited)'
+  puts "PATCH /posts/#{json_post_slug}.json -> #{json_update.code}, title is now '#{updated_via_json['title']}'"
+
+  json_update_cookie = cookie_from(json_update)
+  cookie = json_update_cookie unless json_update_cookie.empty?
+
+  stale_json_update_body = URI.encode_www_form(
+    'post[title]' => 'stale attempt', 'post[body]' => 'this must be rejected',
+    'post[lock_version]' => '0', '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  stale_json_update = http.post("/posts/#{json_post_slug}.json", stale_json_update_body,
+                                 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless stale_json_update.code == '409'
+    raise "expected a stale lock_version via .json to be rejected with 409, got #{stale_json_update.code}"
+  end
+  stale_update_errors = JSON.parse(stale_json_update.body)['errors']
+  unless stale_update_errors.is_a?(Array) && stale_update_errors.first['source']['pointer'] == '/data/attributes/lock_version'
+    raise "expected the 409 body to be a JSON:API error pointing at lock_version, got #{stale_json_update.body}"
+  end
+  puts "PATCH /posts/#{json_post_slug}.json with a stale lock_version -> #{stale_json_update.code} " \
+       "(StaleObjectError still caught, now with a JSON:API error body instead of a re-rendered form)"
+
+  # 'no-such-post-slug', not a bare number - posts#show is slug-keyed now
+  # (see app.rb's `param: :slug`), so this exercises the SAME "no row
+  # matches" 404 path a real mistyped/stale URL would hit.
+  missing_html = http.get('/posts/no-such-post-slug', 'Cookie' => cookie)
+  puts "GET /posts/no-such-post-slug (HTML) -> #{missing_html.code} #{missing_html['content-type']}"
+  raise "expected a plain-text/HTML 404 for a missing post, got #{missing_html.code}" unless missing_html.code == '404'
+  raise 'an HTML-format 404 must not be a JSON:API error body' if missing_html.body.strip.start_with?('{')
+
+  missing_json = http.get('/posts/no-such-post-slug.json', 'Cookie' => cookie)
+  puts "GET /posts/no-such-post-slug.json -> #{missing_json.code} #{missing_json['content-type']}"
+  raise "expected a JSON:API 404 for a missing post via .json, got #{missing_json.code}" unless missing_json.code == '404'
+  missing_errors = JSON.parse(missing_json.body)['errors']
+  unless missing_errors.is_a?(Array) && missing_errors.size == 1 && missing_errors.first['status'] == '404'
+    raise "expected a single JSON:API error object with status 404, got #{missing_json.body}"
+  end
+  raise 'a 404 JSON:API error has no single attribute to point at, so source must be absent' if missing_errors.first.key?('source')
+  puts "GET /posts/no-such-post-slug.json -> #{missing_json.code}, errors[0]={status: #{missing_errors.first['status'].inspect}, " \
+       "detail: #{missing_errors.first['detail'].inspect}} (respond_not_found: same JSON:API shape as render_errors, no source.pointer)"
+
+  puts '-' * 40
+  puts 'Comment belongs_to :post, counter_cache: true - posts#index reads post.comments_count, ' \
+       'a plain column, instead of running a query per post to count its comments'
+  home_with_two_comments = http.get('/', 'Cookie' => cookie)
+  unless home_with_two_comments.body.include?('2 comment(s)')
+    raise "expected the index listing to show the counter-cached total of 2 comments, body was: " \
+          "#{home_with_two_comments.body[/<li class="post".*?<\/li>/m]}"
+  end
+  puts "GET / -> post listing shows '2 comment(s)' (Post#comments_count bumped twice by Comment's after_create hook)"
+
+  second_comment_id = now_stale.body.scan(/id="comment-(\d+)"/).flatten.first
+  raise 'could not find the second comment id (newest-first ordering) on the post page' unless second_comment_id
+  second_comment_delete_path = "/posts/#{post_id}/comments/#{second_comment_id}"
+  second_comment_destroy = http.post(
+    second_comment_delete_path, URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token),
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie
+  )
+  unless second_comment_destroy.code == '302'
+    raise "expected destroying the second comment to redirect, got #{second_comment_destroy.code}"
+  end
+  destroy_comment_cookie = cookie_from(second_comment_destroy)
+  cookie = destroy_comment_cookie unless destroy_comment_cookie.empty?
+  puts "POST #{second_comment_delete_path} with _method=DELETE -> #{second_comment_destroy.code}"
+
+  home_with_one_comment = http.get('/', 'Cookie' => cookie)
+  unless home_with_one_comment.body.include?('1 comment(s)')
+    raise 'expected the index listing to show comments_count back down to 1 after destroying a comment'
+  end
+  raise 'stale 2-comment count must not still be showing' if home_with_one_comment.body.include?('2 comment(s)')
+  puts "GET / -> post listing shows '1 comment(s)' (Comment#destroy decremented Post#comments_count back down)"
+
+  polish = http.get('/?locale=pl')
+  raise 'locale switch did not translate the tagline' unless polish.body.include?('Maly blog')
+  puts 'GET /?locale=pl -> tagline rendered in Polish'
+
+  edit_page = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  puts "GET #{post_path}/edit -> #{edit_page.code}"
+  raise 'edit form should be pre-filled with the current title' unless edit_page.body.include?('value="Hello from Prism"')
+
+  puts '-' * 40
+  puts 'PostsController#preview - diffs a proposed edit against the saved row without persisting it, ' \
+       'using Prism::Orm::Dirty#restore_attributes to revert its Post instance so the SAME response can ' \
+       'still show the actual saved title alongside the proposed one'
+  preview_lock_version = edit_page.body[/name="post\[lock_version\]"[^>]*value="([^"]*)"/, 1]
+  raise 'edit form should carry the current lock_version for the preview scene' if preview_lock_version.to_s.empty?
+  preview_attempt_body = URI.encode_www_form(
+    'post[title]' => 'Previewed title, not yet saved', 'post[body]' => 'Previewed body, not yet saved.',
+    'post[lock_version]' => preview_lock_version, '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  preview = http.post("#{post_path}/preview", preview_attempt_body,
+                       'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{post_path}/preview with _method=PATCH -> #{preview.code}"
+  raise "expected the preview action to render 200, got #{preview.code}" unless preview.code == '200'
+  unless preview.body.include?('Previewed title, not yet saved')
+    raise 'preview response should show the proposed title in the diff table'
+  end
+  unless preview.body.include?('Hello from Prism')
+    raise "preview response should still show the post's actual saved title - " \
+          "Post#restore_attributes should have reverted the in-memory change before rendering"
+  end
+  puts "POST #{post_path}/preview -> #{preview.code}, response shows both the proposed title (diff) and the " \
+       "still-saved current title (restore_attributes reverted the model instance within the same request)"
+
+  not_yet_saved = http.get(post_path, 'Cookie' => cookie)
+  raise 'the previewed title must never have been persisted' if not_yet_saved.body.include?('Previewed title, not yet saved')
+  puts "GET #{post_path} -> the previewed title was never written to disk, only diffed"
+
+  update_body = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (edited)', 'post[body]' => 'Updated through a dirty-tracked update.',
+    '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  update = http.post(post_path, update_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{post_path} with _method=PATCH -> #{update.code} Location=#{update['location']}"
+  raise "expected the update to redirect back to the post, got #{update.code}" unless update.code == '302'
+  post_update_cookie = cookie_from(update)
+  cookie = post_update_cookie unless post_update_cookie.empty?
+
+  updated_show = http.get(post_path, 'Cookie' => cookie)
+  raise 'updated title did not appear on the show page' unless updated_show.body.include?('Hello from Prism (edited)')
+  unless updated_show.body.include?('changed: title, body') || updated_show.body.include?('zmienione: title, body')
+    raise 'Prism::Orm::Dirty-backed notice should list the fields that actually changed'
+  end
+  puts "GET #{post_path} -> title/body updated, dirty-tracking notice named the changed fields"
+
+  noop_body = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (edited)', 'post[body]' => 'Updated through a dirty-tracked update.',
+    '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  noop = http.post(post_path, noop_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the no-op update to redirect too, got #{noop.code}" unless noop.code == '302'
+  noop_cookie = cookie_from(noop)
+  cookie = noop_cookie unless noop_cookie.empty?
+  noop_show = http.get(post_path, 'Cookie' => cookie)
+  unless noop_show.body.include?('Nothing changed') || noop_show.body.include?('Nic sie nie zmienilo')
+    raise 'submitting identical values should report that Prism::Orm::Dirty saw zero real changes'
+  end
+  puts "POST #{post_path} with identical values -> Post#saved_changes was empty, notice said nothing changed"
+
+  # Prism::Orm::Locking: two "browser tabs" open the same edit form (each
+  # capturing the lock_version the row had at that moment), tab A saves
+  # first and bumps it, then tab B - still holding the OLD lock_version in
+  # its hidden field - submits on top of that. Store#update's version check
+  # runs inside the same PStore transaction as the merge, so tab B's write
+  # cannot silently clobber tab A's: it must come back as a 409 with the
+  # conflict notice, and tab A's title must survive untouched.
+  tab_a_edit = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  tab_b_edit = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  tab_a_lock_version = tab_a_edit.body[/name="post\[lock_version\]"[^>]*value="([^"]*)"/, 1]
+  tab_b_lock_version = tab_b_edit.body[/name="post\[lock_version\]"[^>]*value="([^"]*)"/, 1]
+  raise 'edit form should carry the current lock_version in a hidden field' if tab_a_lock_version.to_s.empty?
+  raise 'both tabs should have observed the same lock_version before either saved' unless tab_a_lock_version == tab_b_lock_version
+
+  tab_a_save_body = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (tab A won)', 'post[body]' => 'Saved first.',
+    'post[lock_version]' => tab_a_lock_version, '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  tab_a_save = http.post(post_path, tab_a_save_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected tab A's save to succeed, got #{tab_a_save.code}" unless tab_a_save.code == '302'
+  tab_a_cookie = cookie_from(tab_a_save)
+  cookie = tab_a_cookie unless tab_a_cookie.empty?
+  puts "POST #{post_path}/edit tab A (lock_version=#{tab_a_lock_version}) -> #{tab_a_save.code}, saved first"
+
+  tab_b_save_body = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (tab B lost)', 'post[body]' => 'Submitted stale, should be rejected.',
+    'post[lock_version]' => tab_b_lock_version, '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  tab_b_save = http.post(post_path, tab_b_save_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless tab_b_save.code == '409'
+    raise "expected tab B's stale save to be rejected with 409, got #{tab_b_save.code}"
+  end
+  unless tab_b_save.body.include?('Someone else changed this post') || tab_b_save.body.include?('Ktos inny zmienil ten wpis')
+    raise 'the 409 response should render the stale-conflict notice'
+  end
+  puts "POST #{post_path}/edit tab B (stale lock_version=#{tab_b_lock_version}) -> #{tab_b_save.code} (expected 409, StaleObjectError caught)"
+
+  after_conflict = http.get(post_path, 'Cookie' => cookie)
+  raise "tab B's rejected write must not have overwritten tab A's title" unless after_conflict.body.include?('Hello from Prism (tab A won)')
+  raise "tab B's rejected write must not have leaked through" if after_conflict.body.include?('tab B lost')
+  puts "GET #{post_path} -> tab A's title survives untouched, Prism::Orm::Locking prevented the lost update"
+
+  puts '-' * 40
+  puts 'Post.accepts_nested_attributes_for :comments - the author moderates a comment from the POST edit form ' \
+       'itself, not that comment\'s own /comments/:id route'
+  moderation_comment_body = URI.encode_www_form(
+    'comment[author]' => 'Someone to moderate', 'comment[body]' => 'unmoderated text', 'authenticity_token' => token
+  )
+  moderation_comment = http.post("/posts/#{post_id}/comments", moderation_comment_body,
+                                  'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the extra comment to redirect, got #{moderation_comment.code}" unless moderation_comment.code == '302'
+  moderation_comment_cookie = cookie_from(moderation_comment)
+  cookie = moderation_comment_cookie unless moderation_comment_cookie.empty?
+
+  before_moderation_home = http.get('/', 'Cookie' => cookie)
+  unless before_moderation_home.body.include?('2 comment(s)')
+    raise 'expected comments_count to read 2 before the moderation scene (the tab-A comment plus this new one)'
+  end
+  puts "POST /posts/#{post_id}/comments -> #{moderation_comment.code} (a second comment to moderate through the post form)"
+
+  moderation_edit_page = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  moderation_index = nil
+  moderation_edit_page.body.scan(/name="post\[comments_attributes\]\[(\d+)\]\[id\]"[^>]*value="(\d+)"/) do |index, id|
+    moderation_index = index if id.to_i != comment_id.to_i
+  end
+  raise 'edit form should render a nested field for the comment to be moderated' unless moderation_index
+  raise 'moderation nested field should carry the unmoderated body' unless moderation_edit_page.body.include?('unmoderated text')
+  puts "GET #{post_path}/edit -> FormBuilder#fields_for rendered comments_attributes[#{moderation_index}] for the new comment"
+
+  moderation_lock_version = moderation_edit_page.body[/name="post\[lock_version\]"[^>]*value="([^"]*)"/, 1]
+  moderate_body_edit = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (tab A won)', 'post[body]' => 'Saved first.',
+    'post[lock_version]' => moderation_lock_version,
+    "post[comments_attributes][#{moderation_index}][id]" => moderation_edit_page.body[/name="post\[comments_attributes\]\[#{moderation_index}\]\[id\]"[^>]*value="(\d+)"/, 1],
+    "post[comments_attributes][#{moderation_index}][body]" => 'Edited by the post author, not the commenter',
+    '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  moderate_edit = http.post(post_path, moderate_body_edit, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the moderation edit to redirect, got #{moderate_edit.code}" unless moderate_edit.code == '302'
+  moderate_edit_cookie = cookie_from(moderate_edit)
+  cookie = moderate_edit_cookie unless moderate_edit_cookie.empty?
+  puts "POST #{post_path} with comments_attributes[#{moderation_index}][body] -> #{moderate_edit.code}"
+
+  moderated_show = http.get(post_path, 'Cookie' => cookie)
+  unless moderated_show.body.include?('Edited by the post author, not the commenter')
+    raise 'expected the comment moderated through the post edit form to show its new body on the post page'
+  end
+  raise 'the other comment must not have been touched by this moderation edit' unless moderated_show.body.include?('Nice post, tab A won!')
+  puts "GET #{post_path} -> the moderated comment shows its new body, the untouched comment (tab A/B locking scene) is unaffected"
+
+  moderation_edit_page_2 = http.get("#{post_path}/edit", 'Cookie' => cookie)
+  moderation_lock_version_2 = moderation_edit_page_2.body[/name="post\[lock_version\]"[^>]*value="([^"]*)"/, 1]
+  destroy_via_moderation_body = URI.encode_www_form(
+    'post[title]' => 'Hello from Prism (tab A won)', 'post[body]' => 'Saved first.',
+    'post[lock_version]' => moderation_lock_version_2,
+    "post[comments_attributes][#{moderation_index}][id]" => moderation_edit_page.body[/name="post\[comments_attributes\]\[#{moderation_index}\]\[id\]"[^>]*value="(\d+)"/, 1],
+    "post[comments_attributes][#{moderation_index}][_destroy]" => '1',
+    '_method' => 'PATCH', 'authenticity_token' => token
+  )
+  destroy_via_moderation = http.post(post_path, destroy_via_moderation_body,
+                                      'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the moderation destroy to redirect, got #{destroy_via_moderation.code}" unless destroy_via_moderation.code == '302'
+  moderation_destroy_cookie = cookie_from(destroy_via_moderation)
+  cookie = moderation_destroy_cookie unless moderation_destroy_cookie.empty?
+  puts "POST #{post_path} with comments_attributes[#{moderation_index}][_destroy]=1 -> #{destroy_via_moderation.code} " \
+       '(comment removed through accepts_nested_attributes_for, not its own /comments/:id route)'
+
+  after_moderation_destroy = http.get('/', 'Cookie' => cookie)
+  unless after_moderation_destroy.body.include?('1 comment(s)')
+    raise 'expected comments_count to drop back to 1 - counter_cache after_destroy still fires when a comment ' \
+          'is destroyed through nested attributes, not just through CommentsController#destroy'
+  end
+  puts "GET / -> post listing shows '1 comment(s)' again (counter_cache after_destroy ran for the nested-attributes destroy too)"
+
+  puts '-' * 40
+  puts 'CommentsController#index - comments now get their own paginated URL, not just whatever fits ' \
+       'inline on posts#show'
+  11.times do |i|
+    filler_comment_body = URI.encode_www_form(
+      'comment[author]' => 'Pager', 'comment[body]' => "Filler comment #{i + 1}", 'authenticity_token' => token
+    )
+    filler_comment = http.post("/posts/#{post_id}/comments", filler_comment_body,
+                                'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+    raise "expected filler comment #{i + 1} to redirect, got #{filler_comment.code}" unless filler_comment.code == '302'
+  end
+  puts 'created 11 filler comments (12 total: the surviving tab-A comment plus these) to exercise ' \
+       'Orm::Pagination on comments#index'
+
+  comments_page_one = http.get("/posts/#{post_id}/comments", 'Cookie' => cookie)
+  comments_page_two = http.get("/posts/#{post_id}/comments?page=2", 'Cookie' => cookie)
+  puts "GET /posts/#{post_id}/comments -> #{comments_page_one.code}, GET ...?page=2 -> #{comments_page_two.code}"
+  raise 'comments page 1 should render pagination nav links' unless comments_page_one.body.include?('class="pagination"')
+  unless comments_page_one.body.scan('class="comment"').size == 10
+    raise 'comments page 1 should show exactly 10 comments (Orm::Pagination default per-page)'
+  end
+  raise 'comments page 2 should show the remaining 2 comments' unless comments_page_two.body.scan('class="comment"').size == 2
+
+  comments_etag = comments_page_one['etag']
+  raise 'comments#index should set an ETag now that it uses fresh_when' unless comments_etag
+  puts "GET /posts/#{post_id}/comments -> ETag=#{comments_etag}"
+
+  conditional_comments = http.get("/posts/#{post_id}/comments", 'Cookie' => cookie, 'If-None-Match' => comments_etag)
+  puts "GET /posts/#{post_id}/comments with If-None-Match: #{comments_etag} -> #{conditional_comments.code}"
+  unless conditional_comments.code == '304'
+    raise "expected a fresh conditional GET on comments#index to return 304, got #{conditional_comments.code}"
+  end
+  raise '304 response on comments#index must not carry a body' unless conditional_comments.body.to_s.empty?
+
+  one_more_comment_body = URI.encode_www_form(
+    'comment[author]' => 'Pager', 'comment[body]' => 'One more filler comment', 'authenticity_token' => token
+  )
+  one_more_comment = http.post("/posts/#{post_id}/comments", one_more_comment_body,
+                                'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the extra filler comment to redirect, got #{one_more_comment.code}" unless one_more_comment.code == '302'
+
+  now_stale_comments = http.get("/posts/#{post_id}/comments", 'Cookie' => cookie, 'If-None-Match' => comments_etag)
+  puts "GET /posts/#{post_id}/comments with the OLD If-None-Match after a new comment -> #{now_stale_comments.code}"
+  unless now_stale_comments.code == '200'
+    raise "expected the stale conditional GET on comments#index to return 200, got #{now_stale_comments.code}"
+  end
+  raise 'the fresh comments#index render must carry a NEW ETag, not the stale one' if now_stale_comments['etag'] == comments_etag
+
+  comments_json = http.get("/posts/#{post_id}/comments.json", 'Cookie' => cookie)
+  parsed_comments_json = JSON.parse(comments_json.body)
+  puts "GET /posts/#{post_id}/comments.json -> #{comments_json.code} (#{parsed_comments_json.size} comments on this page)"
+  raise 'comments#index.json should return only the current page (10), not every comment' unless parsed_comments_json.size == 10
+  unless parsed_comments_json.first.keys.sort == %w[author body id post_id status]
+    raise 'comments#index.json entries should carry exactly id/author/body/post_id/status'
 end
 
 server.stop
