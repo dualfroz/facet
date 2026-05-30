@@ -856,6 +856,179 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   raise 'comments#index.json should return only the current page (10), not every comment' unless parsed_comments_json.size == 10
   unless parsed_comments_json.first.keys.sort == %w[author body id post_id status]
     raise 'comments#index.json entries should carry exactly id/author/body/post_id/status'
+  end
+
+  post_show_with_comments_link = http.get(post_path, 'Cookie' => cookie)
+  unless post_show_with_comments_link.body.include?("/posts/#{post_id}/comments")
+    raise 'post show page should link to the new paginated comments#index'
+  end
+  puts "GET #{post_path} -> links to the new /posts/#{post_id}/comments page"
+
+  rejected = http.post('/posts', URI.encode_www_form('post[title]' => 'no token'),
+                        'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST /posts without a CSRF token -> #{rejected.code} (expected 422)"
+  raise 'missing CSRF token should have been rejected' unless rejected.code == '422'
+
+  5.times do |i|
+    filler_body = URI.encode_www_form(
+      'post[title]' => "Filler post #{i + 1}", 'post[body]' => 'Padding content to exercise pagination.',
+      'authenticity_token' => token
+    )
+    filler = http.post('/posts', filler_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+    raise "expected filler post #{i + 1} to redirect, got #{filler.code}" unless filler.code == '302'
+  end
+  puts 'created 5 filler posts (6 total) to exercise Orm::Pagination on posts#index'
+
+  page_one = http.get('/posts', 'Cookie' => cookie)
+  page_two = http.get('/posts?page=2', 'Cookie' => cookie)
+  puts "GET /posts -> #{page_one.code}, GET /posts?page=2 -> #{page_two.code}"
+  raise 'page 1 should render pagination nav links' unless page_one.body.include?('class="pagination"')
+  raise 'page 2 should render a different set of posts than page 1' if page_one.body == page_two.body
+  raise 'page 2 should still contain the oldest post (Hello from Prism)' unless page_two.body.include?('Hello from Prism')
+
+  fresh_index = http.get('/posts', 'Cookie' => cookie)
+  index_etag = fresh_index['etag']
+  raise 'posts#index should set an ETag now that it uses fresh_when' unless index_etag
+  puts "GET /posts -> #{fresh_index.code}, ETag=#{index_etag}"
+
+  conditional_index = http.get('/posts', 'Cookie' => cookie, 'If-None-Match' => index_etag)
+  puts "GET /posts with If-None-Match: #{index_etag} -> #{conditional_index.code}"
+  raise "expected a fresh conditional GET on the index to return 304, got #{conditional_index.code}" unless conditional_index.code == '304'
+  raise '304 response on the index must not carry a body' unless conditional_index.body.to_s.empty?
+
+  another_filler_body = URI.encode_www_form(
+    'post[title]' => 'One more filler post', 'post[body]' => 'Exercises index etag invalidation.',
+    'authenticity_token' => token
+  )
+  another_filler = http.post('/posts', another_filler_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected the extra filler post to redirect, got #{another_filler.code}" unless another_filler.code == '302'
+  index_after_new_post_cookie = cookie_from(another_filler)
+  cookie = index_after_new_post_cookie unless index_after_new_post_cookie.empty?
+
+  now_stale_index = http.get('/posts', 'Cookie' => cookie, 'If-None-Match' => index_etag)
+  puts "GET /posts with the OLD If-None-Match after a new post -> #{now_stale_index.code}"
+  unless now_stale_index.code == '200'
+    raise "expected the stale index ETag to be rejected after a new post shifted pagination, got #{now_stale_index.code}"
+  end
+  raise 'the fresh index render must carry a NEW ETag, not the stale one' if now_stale_index['etag'] == index_etag
+  puts "GET /posts -> #{now_stale_index.code} (ETag changed after a new post shifted total_count/pagination)"
+
+  puts '-' * 40
+  puts "exercising Post's enum :status (draft/published/archived) via #publish/#unpublish"
+  status_target_path = another_filler['location']
+
+  before_unpublish_index = http.get('/posts', 'Cookie' => cookie)
+  raise "'One more filler post' should be visible on the index" unless before_unpublish_index.body.include?('One more filler post')
+
+  unpublish_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  unpublish = http.post("#{status_target_path}/unpublish", unpublish_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{status_target_path}/unpublish with _method=PATCH -> #{unpublish.code} Location=#{unpublish['location']}"
+  raise "expected the unpublish action to redirect, got #{unpublish.code}" unless unpublish.code == '302'
+  unpublish_cookie = cookie_from(unpublish)
+  cookie = unpublish_cookie unless unpublish_cookie.empty?
+
+  after_unpublish_index = http.get('/posts', 'Cookie' => cookie)
+  raise 'a draft post must not appear on the public index' if after_unpublish_index.body.include?('One more filler post')
+
+  draft_show = http.get(status_target_path, 'Cookie' => cookie)
+  raise "a draft's own show page must still be reachable directly by its author" unless draft_show.code == '200'
+  raise 'show page should render the Draft status label while unpublished' unless draft_show.body.include?('Draft')
+  puts "GET #{status_target_path} while a draft -> #{draft_show.code} (still reachable directly, index no longer lists it)"
+
+  republish_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  republish = http.post("#{status_target_path}/publish", republish_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{status_target_path}/publish with _method=PATCH -> #{republish.code}"
+  raise "expected the publish action to redirect, got #{republish.code}" unless republish.code == '302'
+  republish_cookie = cookie_from(republish)
+  cookie = republish_cookie unless republish_cookie.empty?
+
+  after_republish_index = http.get('/posts', 'Cookie' => cookie)
+  raise 're-published post should be back on the public index' unless after_republish_index.body.include?('One more filler post')
+  puts 'GET /posts -> re-published post is listed again'
+
+  puts '-' * 40
+  puts "checking that add_index :posts, :status (db/migrate/#{'20260907000003_add_index_on_posts_status.rb'}) is really used by the live posts#index request, not just the synthetic CountingIndexStore in test/test_orm_index.rb"
+  index_usage_log_offset = File.size(log_path)
+  http.get('/posts', 'Cookie' => cookie)
+  index_usage_log_lines = File.read(log_path)[index_usage_log_offset..].to_s
+  unless index_usage_log_lines.include?('operation="SELECT INDEX"') && index_usage_log_lines.include?('table="posts"')
+    raise 'expected Post.published (the enum scope backing posts#index, -> where(status: 1)) to hit the new posts.status index instead of a full table scan'
+  end
+  raise 'expected the posts.status index lookup to be reported as covering the status column' unless index_usage_log_lines.include?('columns=["status"]')
+  puts '  sql.prism log line for this GET /posts shows operation="SELECT INDEX" table="posts" columns=["status"] - the enum scope reused the real index, zero full scan'
+
+  puts '-' * 40
+  puts "checking the posts#index ?days= recency filter (Post.created_within, db/migrate/20260907000004_add_index_on_posts_created_at.rb)"
+  recency_log_offset = File.size(log_path)
+  recent_index = http.get('/posts?days=7', 'Cookie' => cookie)
+  raise "expected GET /posts?days=7 to succeed, got #{recent_index.code}" unless recent_index.code == '200'
+  raise 'every post in this demo run was just created, so the 7-day filter must still show them' unless recent_index.body.include?('One more filler post')
+  recency_log_lines = File.read(log_path)[recency_log_offset..].to_s
+  # .published is chained BEFORE .created_within on posts#index, and
+  # Relation#indexed_candidates tries an equality-covering index before it
+  # ever looks at ranges - so this combined query resolves entirely through
+  # the posts.status index (see the "SELECT INDEX" check above) and never
+  # reaches the created_at range index at all. That is correct (still zero
+  # full scans), just not proof of the range index specifically - see the
+  # direct Post.created_within call below for that.
+  if recency_log_lines.include?("operation=\"SELECT\" table=\"posts\"")
+    raise 'expected Post.published.created_within(...) (posts#index ?days= filter) to resolve through an index, not a bare full table scan'
+  end
+  puts '  GET /posts?days=7 resolved through an index (posts.status, since .published already narrows it down), zero full scan'
+
+  ancient_index = http.get('/posts?days=0', 'Cookie' => cookie)
+  raise "expected GET /posts?days=0 (filter off) to succeed, got #{ancient_index.code}" unless ancient_index.code == '200'
+  raise 'days=0 must mean "no recency filter", same post set as plain /posts' unless ancient_index.body.include?('One more filler post')
+  puts '  GET /posts?days=0 -> filter off, same post set as an unfiltered /posts'
+
+  # Isolates Post.created_within itself (no .published in front of it, so
+  # nothing else could resolve the query first) to prove the created_at
+  # range index specifically is what's backing it, not just an accident of
+  # chaining order.
+  range_only_log_offset = File.size(log_path)
+  recent_unscoped = Post.created_within(7).to_a
+  raise 'Post.created_within(7) should include every post created during this demo run' if recent_unscoped.empty?
+  range_only_log_lines = File.read(log_path)[range_only_log_offset..].to_s
+  unless range_only_log_lines.include?('operation="SELECT INDEX RANGE"') && range_only_log_lines.include?('table="posts"')
+    raise 'expected the standalone Post.created_within(7) to hit the posts.created_at range index instead of a full table scan'
+  end
+  raise 'expected the posts.created_at range index lookup to be reported as covering the created_at column' unless range_only_log_lines.include?('columns=["created_at"]')
+  puts '  Post.created_within(7) alone -> sql.prism shows operation="SELECT INDEX RANGE" table="posts" columns=["created_at"], zero full scan'
+
+  puts '-' * 40
+  puts 'checking GET /posts/export (PostsController#export) - Prism::Controller#stream over a REAL socket, not just a directly-invoked App#call(env) tuple like test_controller_streaming.rb/test_server.rb already cover'
+  export_response = http.get('/posts/export', 'Cookie' => cookie)
+  raise "expected GET /posts/export to succeed, got #{export_response.code}" unless export_response.code == '200'
+  raise 'expected the export to be sent as chunked Transfer-Encoding, not a single buffered Content-Length body' unless export_response['transfer-encoding'] == 'chunked'
+  raise 'a chunked response must not also carry a Content-Length' if export_response['content-length']
+  raise "expected text/csv, got #{export_response['content-type']}" unless export_response['content-type'] == 'text/csv'
+  csv_lines = export_response.body.lines
+  raise 'expected a header row followed by one row per published post' unless csv_lines.first == "id,title,created_at\n"
+  raise 'expected the re-published post from the enum scene above to be in the export' unless export_response.body.include?('One more filler post')
+  expected_row_count = Post.published.count
+  raise "expected #{expected_row_count} data row(s) (Post.published.count), got #{csv_lines.size - 1} - the export scope must exclude drafts/archived just like .published does" unless csv_lines.size - 1 == expected_row_count
+  puts "  GET /posts/export -> #{export_response.code}, Transfer-Encoding: chunked, #{expected_row_count} published post row(s) (matches Post.published.count exactly)"
+
+  puts '-' * 40
+  puts 'checking Prism::Middleware::Compression over a REAL socket - setting our own Accept-Encoding disables ' \
+       "Net::HTTP's transparent auto-decoding, so response.body below is the raw wire bytes, not something " \
+       'this script infers from matching decompressed content (which every other Net::HTTP call above already ' \
+       'does silently, since Net::HTTP sends its own Accept-Encoding: gzip by default and decodes for us)'
+  gzip_headers = {'Cookie' => cookie, 'Accept-Encoding' => 'gzip'}
+
+  compressed_index = http.get('/posts', gzip_headers)
+  raise "expected GET /posts to succeed, got #{compressed_index.code}" unless compressed_index.code == '200'
+  raise 'expected Content-Encoding: gzip on a compressible HTML response' unless compressed_index['content-encoding'] == 'gzip'
+  decompressed_index = Zlib::GzipReader.new(StringIO.new(compressed_index.body)).read
+  raise 'expected the decompressed body to still be the same posts#index HTML' unless decompressed_index.include?('One more filler post')
+  raise 'expected gzip to actually shrink a repetitive HTML page' unless compressed_index.body.bytesize < decompressed_index.bytesize
+  raise 'a compressed response Content-Length must describe the compressed bytes on the wire, not the original size' \
+    unless compressed_index['content-length'].to_i == compressed_index.body.bytesize
+  puts "  GET /posts (Accept-Encoding: gzip) -> #{compressed_index.code}, Content-Encoding: gzip, " \
+       "#{decompressed_index.bytesize} bytes -> #{compressed_index.body.bytesize} bytes on the wire"
+
+  compressed_export = http.get('/posts/export', gzip_headers)
+  raise "expected GET /posts/export to succeed, got #{compressed_export.code}" unless compressed_export.code == '200'
 end
 
 server.stop
