@@ -23,6 +23,14 @@ module Prism
         @prefix_stack ||= []
       end
 
+      def module_stack
+        @module_stack ||= []
+      end
+
+      def name_prefix_stack
+        @name_prefix_stack ||= []
+      end
+
       def settings
         @settings ||= { views: 'views' }
       end
@@ -36,9 +44,64 @@ module Prism
         reset_stack!
       end
 
-      def enable_sessions(secret:, **options)
+      # `previous_secrets:` mirrors enable_attribute_encryption's rotation
+      # contract: cookies signed under a retired secret keep decoding, new
+      # ones always sign under `secret`, so rotating SESSION_SECRET no
+      # longer force-logs-out every visitor.
+      def enable_sessions(secret:, previous_secrets: [], **options)
         set(:session_secret, secret)
-        use(Middleware::Session, secret: secret, **options)
+        set(:session_previous_secrets, previous_secrets)
+        use(Middleware::Session, secret: secret, previous_secrets: previous_secrets, **options)
+      end
+
+      # One shared secret backing every `encrypts` column across the app
+      # (Orm::Encryption derives an independent per-attribute key from it) -
+      # meant to be called once at boot, same spot as enable_sessions.
+      def enable_attribute_encryption(secret:, previous_secrets: [])
+        Orm::Encryption.primary_key = secret
+        Orm::Encryption.previous_keys = previous_secrets
+      end
+
+      # Backs every model's `generates_token_for` (Orm::TokenFor) with a
+      # shared secret, same spot/shape as enable_sessions and
+      # enable_attribute_encryption above - a model can call
+      # generates_token_for before this runs (it only declares the purpose/
+      # expiry), but actually minting or verifying a token needs this
+      # called once at boot.
+      def enable_token_signing(secret:, previous_secrets: [])
+        Orm::TokenFor.primary_secret = secret
+        Orm::TokenFor.previous_secrets = previous_secrets
+      end
+
+      # Turns on Bullet-lite N+1 detection (Orm::NPlusOneDetector) for every
+      # request this application dispatches - meant for development/test
+      # boot, same spot as enable_sessions/enable_mailer. `raise_on_violation:
+      # true` turns a detected N+1 into a raised NPlusOneViolation instead of
+      # a logged warning, so a test suite (or a CI-only boot flag) can fail
+      # hard on a perf regression instead of relying on someone reading logs.
+      def enable_n_plus_one_detection(threshold: 2, io: $stderr, raise_on_violation: false)
+        Orm::NPlusOneDetector.enable!(threshold: threshold, io: io, raise_on_violation: raise_on_violation)
+      end
+
+      # Wires Prism::Mailer::Base#url_for so mailer actions/templates can
+      # build absolute links (there is no incoming request to pull a router
+      # or host from inside a mailer, unlike Controller#url_for): points
+      # Mailer at this app's router and stashes host/protocol/port as its
+      # app-wide default_url_options.
+      def enable_mailer(host:, protocol: 'http', port: nil)
+        Mailer.router = router
+        Mailer.default_url_options = { host: host, protocol: protocol, port: port }.compact
+      end
+
+      # Precompiles every file under `source` into `output` (Assets::Compiler,
+      # fingerprinted + manifest.json), points asset_path/friends at the
+      # resulting manifest, and mounts Middleware::Assets to serve `output`
+      # back out at "/assets" with far-future caching. Meant to be called
+      # once at boot, same spot as enable_sessions/enable_mailer.
+      def enable_assets(source:, output:, prefix: '/assets')
+        manifest = Assets::Compiler.new(source: source, output: output).compile!
+        Assets.manifest = manifest
+        use(Middleware::Assets, root: output, prefix: prefix)
       end
 
       def helpers(&block)
@@ -46,8 +109,9 @@ module Prism
       end
 
       %w[get post put patch delete options head].each do |verb|
-        define_method(verb) do |pattern, to: nil, as: nil, &block|
-          router.add(verb, join_prefix(pattern), name: as, to: to, &block)
+        define_method(verb) do |pattern, to: nil, as: nil, constraints: {}, format: false, &block|
+          router.add(verb, join_prefix(pattern), name: join_name(as), to: join_controller_action(to),
+                                                   constraints: constraints, format: format, &block)
         end
       end
 
@@ -55,11 +119,101 @@ module Prism
         get('/', to: to, as: :root)
       end
 
-      def resources(name, only: nil, except: nil, param: :id)
+      # Groups routes under a URL prefix (default "/name") AND a
+      # controller module ("name/" prepended to every "controller#action"
+      # target) AND a route-helper-name prefix ("name_" prepended to every
+      # `as:`), like Rails' `namespace`. `resources :posts` inside
+      # `namespace :admin` dispatches to `Admin::PostsController` and
+      # exposes `admin_posts_path`.
+      # `module: false` (Rails' escape hatch) keeps the URL prefix and the
+      # route-name prefix but leaves the controller lookup untouched, for
+      # when the URL should look namespaced without forcing every
+      # controller under it into a matching Ruby module/directory.
+      def namespace(name, path: nil, module: true, &block)
+        use_module = binding.local_variable_get(:module)
+        prefix_stack.push(path || "/#{name}")
+        module_stack.push(name.to_s) if use_module
+        name_prefix_stack.push(name.to_s)
+        yield
+      ensure
+        prefix_stack.pop
+        module_stack.pop if use_module
+        name_prefix_stack.pop
+      end
+
+      # Standard 7-action RESTful resource collection. A block enables
+      # nested routing: `member`/`collection` for extra actions scoped to
+      # this resource, and further `resources`/`resource` calls nested
+      # under `/name/:id_param_id`.
+      def resources(name, only: nil, except: nil, param: :id, constraints: {}, &block)
         wanted = only || RestActions
         wanted = wanted - Array(except) if except
         singular = Inflector.singularize(name.to_s)
-        (RestActions & wanted).each { |action| add_resource_route(name, action, singular, param) }
+        # Custom collection/member/nested routes go first so a literal
+        # collection path (e.g. "/articles/archive") is tried before the
+        # generic "/articles/:id" show route it would otherwise be
+        # shadowed by (our router dispatches to the first match, like the
+        # built-in "new" action already relies on beating "show").
+        ResourceScope.new(self, name, singular, param).instance_eval(&block) if block
+        (RestActions & wanted).each { |action| add_resource_route(name, action, singular, param, constraints) }
+      end
+
+      # Singular resource: no id segment in the path, since it always
+      # refers to "the current one" (`/profile`, not `/profiles/:id`).
+      # Carries `format: true` on every route, same as the plural
+      # `resources` (`add_resource_route`) - without it a singular resource
+      # such as `resource :session` could never be reached at `/session.json`
+      # the way `/posts.json` already can, only through Accept-header
+      # negotiation, which left the two resource DSLs inconsistent.
+      def resource(name, only: nil, except: nil, &block)
+        wanted = only || SingularRestActions
+        wanted = wanted - Array(except) if except
+        base = "/#{name}"
+        controller = name.to_s
+        (SingularRestActions & wanted).each do |action|
+          case action
+          when :new then get("#{base}/new", to: "#{controller}#new", as: "new_#{name}", format: true)
+          when :create then post(base, to: "#{controller}#create", format: true)
+          when :show then get(base, to: "#{controller}#show", as: name.to_sym, format: true)
+          when :edit then get("#{base}/edit", to: "#{controller}#edit", as: "edit_#{name}", format: true)
+          when :update
+            patch(base, to: "#{controller}#update", format: true)
+            put(base, to: "#{controller}#update", format: true)
+          when :destroy then delete(base, to: "#{controller}#destroy", format: true)
+          end
+        end
+        ResourceScope.new(self, name, name.to_s, nil).instance_eval(&block) if block
+      end
+
+      # Mounts a separate Rack app (anything responding to #call(env)) under
+      # a URL prefix, like Rails' `mount SomeEngine, at: '/some_engine'`.
+      # SCRIPT_NAME/PATH_INFO are rewritten the way Rack::URLMap does, so
+      # the mounted app can build its own relative links from PATH_INFO
+      # without knowing where it was mounted.
+      def mount(path_prefix, app)
+        router.mount(join_prefix(path_prefix), app)
+      end
+
+      # Registers a WebSocket endpoint at `path`, handled by `handler`
+      # (a class exposing #on_open(connection)/#on_message(connection,
+      # message)/#on_close(connection), instantiated fresh per connection
+      # by Server). Looked up by Prism::Server directly via
+      # `find_websocket_handler` before the request ever reaches the
+      # regular Rack `call`/middleware stack, since an Upgrade: websocket
+      # request never gets a normal HTTP response. `max_message_size:`
+      # (bytes) overrides Connection::DEFAULT_MAX_MESSAGE_SIZE for this
+      # endpoint only, e.g. a lower cap for a plain chat feed or a higher
+      # one for an endpoint that legitimately pushes large payloads.
+      def websocket(path, handler, max_message_size: nil)
+        router.add_websocket(join_prefix(path), handler, max_message_size: max_message_size)
+      end
+
+      def find_websocket_handler(path)
+        router.find_websocket(path)
+      end
+
+      def find_websocket_options(path)
+        router.find_websocket_options(path)
       end
 
       def group(prefix)
@@ -92,20 +246,26 @@ module Prism
       private
 
       RestActions = %i[index new create show edit update destroy].freeze
+      SingularRestActions = %i[new create show edit update destroy].freeze
 
-      def add_resource_route(name, action, singular, param)
+      def add_resource_route(name, action, singular, param, constraints = {})
         base = "/#{name}"
         controller = name.to_s
+        route_constraints = constraints.transform_keys(&:to_sym).select { |key, _| key == param.to_sym }
         case action
-        when :index then router.add('GET', join_prefix(base), name: name, to: "#{controller}#index")
-        when :new then router.add('GET', join_prefix("#{base}/new"), name: "new_#{singular}", to: "#{controller}#new")
-        when :create then router.add('POST', join_prefix(base), to: "#{controller}#create")
-        when :show then router.add('GET', join_prefix("#{base}/:#{param}"), name: singular, to: "#{controller}#show")
-        when :edit then router.add('GET', join_prefix("#{base}/:#{param}/edit"), name: "edit_#{singular}", to: "#{controller}#edit")
+        when :index then get(base, to: "#{controller}#index", as: name, format: true)
+        when :new then get("#{base}/new", to: "#{controller}#new", as: "new_#{singular}", format: true)
+        when :create then post(base, to: "#{controller}#create", format: true)
+        when :show
+          get("#{base}/:#{param}", to: "#{controller}#show", as: singular, constraints: route_constraints, format: true)
+        when :edit
+          get("#{base}/:#{param}/edit", to: "#{controller}#edit", as: "edit_#{singular}", constraints: route_constraints, format: true)
         when :update
-          router.add('PATCH', join_prefix("#{base}/:#{param}"), to: "#{controller}#update")
-          router.add('PUT', join_prefix("#{base}/:#{param}"), to: "#{controller}#update")
-        when :destroy then router.add('DELETE', join_prefix("#{base}/:#{param}"), to: "#{controller}#destroy")
+          patch("#{base}/:#{param}", to: "#{controller}#update", constraints: route_constraints, format: true)
+          put("#{base}/:#{param}", to: "#{controller}#update", constraints: route_constraints, format: true)
+        when :destroy
+          delete("#{base}/:#{param}", to: "#{controller}#destroy", as: singular, constraints: route_constraints,
+                                       format: true)
         end
       end
 
