@@ -273,6 +273,22 @@ module Prism
         return pattern if prefix_stack.empty?
         prefix_stack.join + pattern
       end
+
+      def join_controller(controller)
+        return controller if module_stack.empty?
+        "#{module_stack.join('/')}/#{controller}"
+      end
+
+      def join_controller_action(to)
+        return to unless to
+        controller, action = to.split('#', 2)
+        "#{join_controller(controller)}##{action}"
+      end
+
+      def join_name(name)
+        return name if name.nil? || name_prefix_stack.empty?
+        "#{name_prefix_stack.join('_')}_#{name}".to_sym
+      end
     end
 
     attr_reader :request, :response, :env
@@ -285,15 +301,43 @@ module Prism
       head = @request.request_method == 'HEAD'
       lookup_method = head ? 'GET' : @request.request_method
 
-      catch(:halt) do
-        run_before_filters
-        matched = run_routes(lookup_method)
-        handle_not_found unless matched
+      Orm::NPlusOneDetector.reset! if Orm::NPlusOneDetector.enabled?
+      Instrumentation.instrument('process_action.prism', method: @request.request_method,
+                                                           path: @request.path) do |payload|
+        @instrumentation_payload = payload
+        catch(:halt) do
+          begin
+            run_before_filters
+            matched = run_routes(lookup_method) || dispatch_mount
+            handle_not_found unless matched
+          rescue StandardError => e
+            handle_uncaught_exception(e)
+          end
+        end
+        catch(:halt) do
+          run_after_filters
+        end
+        finalize_flash
+        # Deliberately inside the instrumented span's rescue reach (unlike a
+        # plain StandardError, an NPlusOneViolation is raised AFTER the
+        # action already produced a response) - without this rescue, a
+        # violation would blow straight out of #dispatch, past every
+        # middleware and Server#serve's `@app.call(env)` (server.rb has no
+        # StandardError rescue around that call, only EPIPE/ECONNRESET/
+        # IOError), killing the request thread with the socket closed and
+        # NOT ONE byte written back to the client - silent connection death
+        # instead of the same 500 every other uncaught bug in this app gets.
+        # Routing it through handle_uncaught_exception keeps raise_on_
+        # violation usable as a real regression gate (curl/CI sees a normal
+        # 500, not a broken pipe) instead of only being provable in a unit
+        # test that calls NPlusOneDetector.report! directly.
+        begin
+          Orm::NPlusOneDetector.report!(method: @request.request_method, path: @request.path) if Orm::NPlusOneDetector.enabled?
+        rescue Orm::NPlusOneViolation => e
+          handle_uncaught_exception(e)
+        end
+        payload[:status] = @response.status
       end
-      catch(:halt) do
-        run_after_filters
-      end
-      finalize_flash
 
       status, headers, body = @response.finish
       body = [] if head
@@ -335,22 +379,64 @@ module Prism
     end
 
     def dispatch_to_controller(route)
-      controller_class = Object.const_get("#{Inflector.camelize(route.controller_name)}Controller")
+      controller_class = resolve_controller_class(route.controller_name)
       controller = controller_class.new(@env, route.action_name, @request.path_params)
+      @instrumentation_payload&.merge!(controller: route.controller_name, action: route.action_name)
       status, headers, body = controller.process
       @response.status = status
       headers.each { |name, value| @response[name] = value }
       @response.body = body
     end
 
+    def dispatch_mount
+      mounted = self.class.router.find_mount(@request.path)
+      return false unless mounted
+
+      prefix, app = mounted
+      path_info = @request.path.delete_prefix(prefix)
+      path_info = '/' if path_info.empty?
+      mount_env = @env.merge(
+        'SCRIPT_NAME' => "#{@env['SCRIPT_NAME']}#{prefix}",
+        'PATH_INFO' => path_info
+      )
+      status, headers, body = app.call(mount_env)
+      @response.status = status
+      headers.each { |name, value| @response[name] = value }
+      @response.body = body
+      true
+    end
+
     def finalize_body(result)
+      return if @response.streaming?
       return unless @response.body.empty?
       @response.body = [result.to_s] if result.is_a?(String)
+    end
+
+    # "admin/posts" -> Admin::PostsController (each "/"-separated segment
+    # becomes its own camelized module/class, not one flattened name), so
+    # `namespace :admin` dispatches to real nested Ruby modules.
+    def resolve_controller_class(controller_name)
+      segments = controller_name.split('/').map { |segment| Inflector.camelize(segment) }
+      Object.const_get("#{segments.join('::')}Controller")
     end
 
     def handle_not_found
       @response.status = 404
       @response.body = ["Not Found: #{@request.request_method} #{@request.path}"]
+    end
+
+    # Last-resort safety net: a controller's own `rescue_from` handlers
+    # (see Controller#handle_exception) already had first crack at this and
+    # re-raised, so nothing in the app knows how to turn it into a response.
+    # Records it on the instrumentation payload (a LogSubscriber can print
+    # it) and renders a generic 500 - never the exception message or
+    # backtrace, which could leak internals to the client.
+    def handle_uncaught_exception(exception)
+      @instrumentation_payload[:exception] = [exception.class.name, exception.message]
+      @instrumentation_payload[:exception_object] = exception
+      @response.status = 500
+      @response['Content-Type'] = 'text/plain'
+      @response.body = ['Internal Server Error']
     end
 
     def load_template(name)
