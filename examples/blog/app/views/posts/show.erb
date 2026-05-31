@@ -1,2 +1,75 @@
+<% if notice %>
+<p class="notice"><%= notice %></p>
+<% end %>
+
 <h1><%= post.title %></h1>
+<p class="status"><%= t("posts.status_#{post.status}") %></p>
+<% if post.cover %>
+<p><img src="/uploads/<%= post.cover %>" alt="<%= post.title %>"></p>
+<% end %>
 <p><%= post.body %></p>
+<p class="last-activity"><%= t('posts.last_activity', when: l(post.updated_at)) %></p>
+<p>
+  <%= t('likes.count', count: likes_count(post)) %>
+  <% if user_signed_in? %>
+  <% own_like = current_user_like(post) %>
+  <% if own_like %>
+  <%== button_to(t('likes.unlike'), "/likes/#{own_like.id}", method: :delete) %>
+  <% else %>
+  <%== button_to(t('likes.like'), "/likes?likeable_type=Post&likeable_id=#{post.id}") %>
+  <% end %>
+  <% end %>
+</p>
+<% if post.giveaway? %>
+<p class="giveaway">
+  <% if post.giveaway_sold_out? %>
+  <%= t('claims.sold_out_label') %>
+  <% else %>
+  <%= t('claims.remaining_label', count: post.giveaway_remaining) %>
+  <% end %>
+  <% if user_signed_in? %>
+  <% if current_user_claim(post) %>
+  <%= t('claims.already_claimed_label') %>
+  <% elsif !post.giveaway_sold_out? %>
+  <%== button_to(t('claims.claim_button'), "/posts/#{post.to_param}/claims") %>
+  <% end %>
+  <% end %>
+</p>
+<% end %>
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>
+<% if current_user && current_user.id == post.user_id %>
+<p><%== link_to(t('posts.edit_link'), url_for(:edit_post, slug: post.to_param)) %></p>
+<% if post.published? %>
+<%== button_to(t('posts.unpublish'), url_for(:unpublish_post, slug: post.to_param), method: :patch) %>
+<% else %>
+<%== button_to(t('posts.publish'), url_for(:publish_post, slug: post.to_param), method: :patch) %>
+<% end %>
+<%== button_to(t('posts.delete'), url_for(:post, slug: post.to_param), method: :delete, data_confirm: t('posts.confirm_delete')) %>
+<%== link_to(t('posts.trash_heading'), url_for(:trash_posts)) %>
+<% end %>
+
+<h2><%= t('comments.heading') %></h2>
+<p><%== link_to(t('comments.view_all_link'), url_for(:comments, post_id: post.to_param)) %></p>
+<% if comments.empty? %>
+<p><%= t('comments.empty') %></p>
+<% else %>
+<ul class="comments">
+<% comments.each do |comment| %>
+<%== partial('comment', locals: { comment: comment, post: post }) %>
+<% end %>
+</ul>
+<% end %>
+
+<% if user_signed_in? %>
+<% form_for(new_comment, url: "/posts/#{post.to_param}/comments", method: :post) do |f| %>
+  <p>
+    <%== f.label(:author, t('comments.author_label')) %>
+    <%== f.text_field(:author) %>
+  </p>
+  <p>
+    <%== f.label(:body, t('comments.body_label')) %>
+    <%== f.text_area(:body) %>
+  </p>
+  <%== f.submit(t('comments.submit')) %>
+<% end %>
+<% end %>

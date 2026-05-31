@@ -1,0 +1,27 @@
+<% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<h1><%= t('users.heading') %></h1>
+<% form_for(user, url: '/users', method: :post) do |f| %>
+  <p>
+    <%== f.label(:email, t('users.email_label')) %>
+    <%== f.email_field(:email) %>
+    <%== f.error_messages(:email) %>
+  </p>
+  <p>
+    <%== f.label(:password, t('users.password_label')) %>
+    <%== f.password_field(:password) %>
+    <%== f.error_messages(:password) %>
+  </p>
+  <p>
+    <%== f.label(:password_confirmation, t('users.password_confirmation_label')) %>
+    <%== f.password_field(:password_confirmation) %>
+  </p>
+  <%== f.submit(t('users.submit')) %>
+<% end %>

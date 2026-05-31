@@ -1,0 +1,46 @@
+<h1><%= t('posts.preview_heading') %></h1>
+
+<% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<% if diff.empty? %>
+<p><%= t('posts.preview_noop') %></p>
+<% else %>
+<h2><%= t('posts.preview_diff_heading') %></h2>
+<table class="diff">
+<thead>
+<tr><th><%= t('posts.preview_field') %></th><th><%= t('posts.preview_current') %></th><th><%= t('posts.preview_proposed') %></th></tr>
+</thead>
+<tbody>
+<% diff.each do |field, (old_value, new_value)| %>
+<tr>
+  <td><%= field %></td>
+  <td><%= old_value %></td>
+  <td><%= new_value %></td>
+</tr>
+<% end %>
+</tbody>
+</table>
+<% end %>
+
+<!-- post.title here is read straight off `post` AFTER Dirty#restore_attributes -
+     it must be the row's actual saved title, proving the preview above never
+     mutated the persisted record. -->
+<p><%= t('posts.preview_currently_saved', title: post.title) %></p>
+
+<% if errors.empty? %>
+<% form_for(post, url: url_for(:post, slug: post.to_param), method: :patch) do |f| %>
+  <%== f.hidden_field(:title, value: attempted['title']) %>
+  <%== f.hidden_field(:body, value: attempted['body']) %>
+  <%== f.hidden_field(:lock_version) %>
+  <%== f.submit(t('posts.preview_confirm')) %>
+<% end %>
+<% end %>
+
+<p><%== link_to(t('posts.edit_link'), url_for(:edit_post, slug: post.to_param)) %></p>

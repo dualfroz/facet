@@ -1,0 +1,28 @@
+<% unless errors.empty? %>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<h1><%= t('sessions.heading') %></h1>
+<% form_for(User.new, url: '/session', method: :post) do |f| %>
+  <p>
+    <%== f.label(:email, t('sessions.email_label')) %>
+    <%== f.email_field(:email) %>
+  </p>
+  <p>
+    <%== f.label(:password, t('sessions.password_label')) %>
+    <%== f.password_field(:password) %>
+  </p>
+  <p>
+    <%== f.check_box(:remember_me) %>
+    <%== f.label(:remember_me, t('sessions.remember_me_label')) %>
+  </p>
+  <%== f.submit(t('sessions.submit')) %>
+<% end %>
+
+<p><%== link_to(t('sessions.need_account'), url_for(:new_user)) %></p>
+<p><%== link_to(t('sessions.forgot_password'), url_for(:new_password_reset)) %></p>
+<p><%== link_to(t('sessions.resend_confirmation'), url_for(:new_email_confirmation)) %></p>

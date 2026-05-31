@@ -1,0 +1,21 @@
+<% if notice %>
+<p class="notice"><%= notice %></p>
+<% end %>
+
+<h1><%= t('posts.trash_heading') %></h1>
+
+<% if posts.empty? %>
+<p><%= t('posts.trash_empty') %></p>
+<% else %>
+<ul class="posts trash">
+<% posts.each do |post| %>
+<li class="post" id="post-<%= post.to_param %>">
+  <h2><%= post.title %></h2>
+  <p><%= post.body %></p>
+  <%== button_to(t('posts.restore'), url_for(:restore_post, slug: post.to_param), method: :patch) %>
+</li>
+<% end %>
+</ul>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>
