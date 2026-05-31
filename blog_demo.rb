@@ -1375,6 +1375,179 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   forbidden_edit_page = http.get("#{post_path}/edit", 'Cookie' => cookie)
   puts "GET #{post_path}/edit as a DIFFERENT user -> #{forbidden_edit_page.code} Location=#{forbidden_edit_page['location']}"
   unless forbidden_edit_page.code == '302' && forbidden_edit_page['location'] == post_path
+    raise "expected the second user's edit attempt to be redirected back to the post, got " \
+          "#{forbidden_edit_page.code} Location=#{forbidden_edit_page['location']}"
+  end
+
+  forbidden_comment_edit = http.get("#{comment_edit_path}/edit", 'Cookie' => cookie)
+  puts "GET #{comment_edit_path}/edit as a DIFFERENT user -> #{forbidden_comment_edit.code} " \
+       "Location=#{forbidden_comment_edit['location']}"
+  unless forbidden_comment_edit.code == '302' && forbidden_comment_edit['location'] == post_path
+    raise "expected the second user's comment-edit attempt to be redirected back to the post, got " \
+          "#{forbidden_comment_edit.code} Location=#{forbidden_comment_edit['location']}"
+  end
+
+  forbidden_comment_update_body = URI.encode_www_form('comment[body]' => 'hijacked', '_method' => 'PATCH',
+                                                        'authenticity_token' => token)
+  forbidden_comment_update = http.post(comment_edit_path, forbidden_comment_update_body,
+                                        'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{comment_edit_path} with _method=PATCH as a DIFFERENT user -> #{forbidden_comment_update.code} " \
+       "Location=#{forbidden_comment_update['location']}"
+  unless forbidden_comment_update.code == '302' && forbidden_comment_update['location'] == post_path
+    raise "expected the second user's comment-update attempt to be redirected back to the post, got " \
+          "#{forbidden_comment_update.code} Location=#{forbidden_comment_update['location']}"
+  end
+
+  still_owned_comment = http.get(post_path, 'Cookie' => cookie)
+  raise 'the comment must not be hijacked by an unauthorized update attempt' if still_owned_comment.body.include?('hijacked')
+  raise 'the comment should still show its previous edit' unless still_owned_comment.body.include?('Nice post, tab A won!')
+  puts "GET #{post_path} -> comment survives, still owned by its original author"
+
+  still_there = http.get(post_path, 'Cookie' => cookie)
+  raise 'the post must survive an unauthorized delete attempt by another user' unless still_there.code == '200'
+  raise 'the post content should still be there after the forbidden attempt' unless still_there.body.include?('Hello from Prism')
+  puts "GET #{post_path} -> #{still_there.code} (post survives, still owned by its author)"
+
+  puts '-' * 40
+  puts "comment moderation visibility: reader2 (still signed in) posts a brand new comment, which " \
+       'defaults to pending and so is invisible to a stranger until the post owner approves it'
+  pending_comment_body = URI.encode_www_form(
+    'comment[author]' => 'Reader2', 'comment[body]' => 'A brand new pending remark', 'authenticity_token' => token
+  )
+  pending_comment = http.post("/posts/#{post_id}/comments", pending_comment_body,
+                               'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  raise "expected reader2's new comment to redirect, got #{pending_comment.code}" unless pending_comment.code == '302'
+  pending_comment_cookie = cookie_from(pending_comment)
+  cookie = pending_comment_cookie unless pending_comment_cookie.empty?
+  puts "POST /posts/#{post_id}/comments as reader2 -> #{pending_comment.code} (status defaults to pending)"
+
+  own_pending_view = http.get(post_path, 'Cookie' => cookie)
+  unless own_pending_view.body.include?('A brand new pending remark') && own_pending_view.body.include?('Pending approval')
+    raise "a comment's own author should see it, badge and all, while it's still pending"
+  end
+  # posts#show orders comments by created_at desc, so reader2's brand new
+  # comment - the most recent thing on this page - is the first <li>.
+  pending_comment_id = own_pending_view.body[/id="comment-(\d+)"/, 1]
+  raise "could not find reader2's new comment id on the post page" unless pending_comment_id
+  puts "GET #{post_path} as reader2 -> sees own pending comment with its 'Pending approval' badge"
+
+  stranger_view = http.get(post_path)
+  if stranger_view.body.include?('A brand new pending remark')
+    raise 'a signed-out stranger must not see a pending comment that is neither theirs nor on their own post'
+  end
+  puts "GET #{post_path} signed out (no cookie at all) -> pending comment from another user stays hidden " \
+       '(Comment.visible_to)'
+
+  sign_back_in_body = URI.encode_www_form(
+    'user[email]' => 'writer@example.com', 'user[password]' => 'correct horse battery staple',
+    'user[remember_me]' => '1', 'authenticity_token' => token
+  )
+  # .json demonstrates SessionController#create's JSON branch (200 + the
+  # signed-in user, no redirect) instead of the usual 302 - same single
+  # slot spent against the logins/ip throttle either way (see the
+  # hammering loop below), just a different response shape. remember_me=1
+  # also exercises Prism::Authenticatable's persistent-login cookie, now
+  # backed by remember_sessions: LoginSession (multi-device, one row per
+  # browser) instead of a single shared remember_cookie: column - this is
+  # "device A" in the multi-device scene below.
+  sign_back_in = http.post('/session.json', sign_back_in_body,
+                            'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie,
+                            'User-Agent' => 'DeviceA-Desktop/1.0')
+  raise "expected the original author to sign back in via JSON, got #{sign_back_in.code}" unless sign_back_in.code == '200'
+  sign_back_in_json = JSON.parse(sign_back_in.body)
+  raise 'JSON sign-in response should carry the signed-in user email' unless sign_back_in_json['email'] == 'writer@example.com'
+  puts "POST /session.json (sign in, remember_me=1) -> #{sign_back_in.code}, signed in as #{sign_back_in_json['email']} (device A)"
+  fresh_cookie = cookie_from(sign_back_in)
+  cookie = fresh_cookie unless fresh_cookie.empty?
+
+  remember_session_token_a = cookie_value_from(sign_back_in, 'remember_session_token')
+  raise 'expected sign_in(remember: true) to set a remember_session_token cookie' unless remember_session_token_a
+  puts "  Set-Cookie also carried #{remember_session_token_a[/\A[^=]+/]}=... (device A's own LoginSession row)"
+
+  # No session cookie at all here - simulates a brand new browser session
+  # (e.g. after closing the browser) that only still has the persistent
+  # cookie, proving Authenticatable#current_user really falls back to it
+  # instead of the fallback being dead code that only unit tests exercise.
+  remember_only_trash = http.get('/posts/trash', 'Cookie' => remember_session_token_a)
+  unless remember_only_trash.code == '200'
+    raise "expected the remember-me cookie alone to authenticate GET /posts/trash, got #{remember_only_trash.code}"
+  end
+  puts "GET /posts/trash using ONLY device A's remember-me cookie (no session cookie) -> 200"
+  unless cookie_value_from(remember_only_trash, 'prism.session')
+    raise 'expected falling back to the remember cookie to also repopulate a fresh session cookie'
+  end
+  puts '  response also carried a fresh prism.session cookie (fast path repopulated for the next request)'
+
+  puts '-' * 40
+  puts 'multi-device remember me: TWO more entirely independent browsers (own cookie jars, own CSRF tokens, ' \
+       'no cookie ever shared with device A) sign in as the SAME writer account with remember_me=1'
+  remember_session_token_b = sign_in_new_device(http, 'device B', user_agent: 'DeviceB-Mobile/2.0')
+  remember_session_token_c = sign_in_new_device(http, 'device C', user_agent: 'DeviceC-Tablet/3.0')
+
+  devices_page = http.get('/login_sessions', 'Cookie' => cookie)
+  raise "expected device A to load /login_sessions, got #{devices_page.code}" unless devices_page.code == '200'
+  other_ids = devices_page.body.scan(/class="login-session" id="login-session-(\d+)"/).flatten
+  unless other_ids.size == 2 && devices_page.body.include?('login-session current')
+    raise "expected device A's own row plus exactly 2 OTHER remembered devices (B and C), got #{other_ids.inspect}"
+  end
+  puts "GET /login_sessions as device A -> 200, lists itself (\"this device\") plus #{other_ids.size} other " \
+       'remembered devices (B and C) - Prism::Authenticatable#other_login_sessions'
+
+  %w[DeviceA-Desktop/1.0 DeviceB-Mobile/2.0 DeviceC-Tablet/3.0].each do |ua|
+    raise "expected /login_sessions to show \"#{ua}\" (Authenticatable's captured user_agent)" unless devices_page.body.include?(ua)
+  end
+  if devices_page.body.include?(Prism::I18n.t('login_sessions.unknown_user_agent'))
+    raise 'expected every device row to have a captured user_agent, none should fall back to "unknown browser"'
+  end
+  puts '  every row shows its own captured User-Agent (LoginSessionsController#device_detail_for) - none falls ' \
+       'back to "unknown browser", proving Authenticatable#remember_user_with_session really persisted it, not ' \
+       'just accepted the column silently'
+
+  revoke_body = URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token)
+  revoke_one = http.post("/login_sessions/#{other_ids.first}", revoke_body,
+                          'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless revoke_one.code == '302' && revoke_one['location'].to_s.end_with?('/login_sessions')
+    raise "expected device A revoking one other device to redirect back to /login_sessions, got #{revoke_one.code}"
+  end
+  puts "POST /login_sessions/#{other_ids.first} with _method=DELETE (device A revokes ONE other device) -> " \
+       "#{revoke_one.code}"
+
+  b_survives = http.get('/posts/trash', 'Cookie' => remember_session_token_b).code == '200'
+  c_survives = http.get('/posts/trash', 'Cookie' => remember_session_token_c).code == '200'
+  unless [b_survives, c_survives].count(true) == 1
+    raise "expected revoking exactly one LoginSession row to break exactly one of B/C's remember cookies, " \
+          "got device B survives=#{b_survives} device C survives=#{c_survives}"
+  end
+  survivor_cookie = b_survives ? remember_session_token_b : remember_session_token_c
+  puts '  the revoked device\'s remember-me cookie is now dead (falls through to sign-in), the untouched ' \
+       'device\'s cookie still authenticates - per-device revocation, unlike sign_out rotating one shared column'
+
+  sign_out_others = http.post('/login_sessions/sign_out_others',
+                               URI.encode_www_form('authenticity_token' => token),
+                               'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless sign_out_others.code == '302' && sign_out_others['location'].to_s.end_with?('/login_sessions')
+    raise "expected sign_out_all_other_sessions to redirect back to /login_sessions, got #{sign_out_others.code}"
+  end
+  puts "POST /login_sessions/sign_out_others as device A -> #{sign_out_others.code} " \
+       '(Authenticatable#sign_out_all_other_sessions revokes every remaining OTHER device in one call)'
+
+  survivor_after_bulk = http.get('/posts/trash', 'Cookie' => survivor_cookie)
+  unless survivor_after_bulk.code == '302' && survivor_after_bulk['location'].to_s.end_with?('/session/new')
+    raise "expected the last surviving other device to be signed out after sign_out_others, got #{survivor_after_bulk.code}"
+  end
+  puts '  the last surviving OTHER device is now signed out too -> 302 to sign-in'
+
+  device_a_still_works = http.get('/posts/trash', 'Cookie' => remember_session_token_a)
+  unless device_a_still_works.code == '200'
+    raise "expected device A's OWN remember cookie to survive sign_out_all_other_sessions, got #{device_a_still_works.code}"
+  end
+  puts "  device A's OWN remember-me cookie still works -> 200 (sign_out_all_other_sessions never touches the " \
+       'caller\'s own session)'
+
+  moderator_view = http.get(post_path, 'Cookie' => cookie)
+  unless moderator_view.body.include?('A brand new pending remark')
+    raise "the post's own author (moderator) should see a pending comment even before approving it"
+  end
 end
 
 server.stop
