@@ -1721,7 +1721,269 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   end
   puts 'Like/Comment rows under the trashed post are hidden but not gone (only_deleted still finds them, ' \
        'polymorphic dependent: :destroy through a soft-delete)'
+
+  trash_page = http.get('/posts/trash', 'Cookie' => cookie)
+  unless trash_page.code == '200' && trash_page.body.include?("id=\"post-#{post_id}\"")
+    raise "expected the post's own author to see it in their trash, got #{trash_page.code}"
+  end
+  puts "GET /posts/trash as the post's author -> 200, trashed post listed"
+
+  restore_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  restore = http.post("/posts/#{post_id}/restore", restore_body,
+                       'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless restore.code == '302' && restore['location'].to_s.end_with?('/posts/trash')
+    raise "expected restore to redirect back to the trash, got #{restore.code} Location=#{restore['location']}"
+  end
+  puts "POST /posts/#{post_id}/restore with _method=PATCH -> #{restore.code} Location=#{restore['location']}"
+
+  restored = http.get(post_path, 'Cookie' => cookie)
+  raise "restored post should be reachable again, got #{restored.code}" unless restored.code == '200'
+  raise 'restored post should still reference its original cover file' unless restored.body.include?(File.basename(cover_file))
+  puts "GET #{post_path} after restore -> 200, original cover still referenced"
+
+  trash_page_after_restore = http.get('/posts/trash', 'Cookie' => cookie)
+  if trash_page_after_restore.body.include?("id=\"post-#{post_id}\"")
+    raise 'a restored post must no longer show up in the trash'
+  end
+  puts 'GET /posts/trash after restore -> the restored post is no longer listed'
+
+  # PostsController#restore calls post.restore(recursive: true) - the post's
+  # own Like, its cascaded-away Comment, AND that comment's own Like (a
+  # grandchild) should all have come back with it, not just the post row.
+  unless Comment.where(id: comment_id.to_i).count == 1
+    raise 'restore(recursive: true) should have brought the cascaded comment back too'
+  end
+  unless Like.where(likeable_type: 'Post', likeable_id: post_row_id).count == 1
+    raise "restore(recursive: true) should have brought the post's own Like back too"
+  end
+  unless Like.where(likeable_type: 'Comment', likeable_id: comment_id.to_i).count == 1
+    raise "restore(recursive: true) should have recursively restored the comment's own Like too"
+  end
+  raise 'restoring a comment should have re-incremented comments_count' unless Post.find_by!(slug: post_id).comments_count.positive?
+  unless Post.find_by!(slug: post_id).likes_count == 1
+    raise "Post#after_restore counter_cache hook should have re-incremented likes_count for the post's own Like"
+  end
+  unless Comment.find(comment_id).likes_count == 1
+    raise "cascaded Comment#after_restore counter_cache hook should have re-incremented its own likes_count too"
+  end
+  puts 'restore(recursive: true) brought the comment AND both Likes (post-level and comment-level) back ' \
+       '(Associable#cascade_restore_dependent_associations recursing two levels deep, counter_cache re-synced)'
+
+  puts '-' * 40
+  puts 'deleting and restoring ONE comment on its own, independent of its (live, not trashed) post - ' \
+       'CommentsController#trash/#restore, a flat top-level page (not nested under /posts/:post_id)'
+  comments_count_before_solo_delete = Post.find_by!(slug: post_id).comments_count
+  solo_delete_body = URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token)
+  solo_delete = http.post(comment_edit_path, solo_delete_body,
+                           'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless solo_delete.code == '302' && solo_delete['location'] == post_path
+    raise "expected the solo comment delete to redirect back to the post, got #{solo_delete.code}"
+  end
+  puts "POST #{comment_edit_path} with _method=DELETE -> #{solo_delete.code} (soft-deleted, Comment#acts_as_paranoid)"
+
+  post_after_solo_delete = http.get(post_path, 'Cookie' => cookie)
+  raise 'the post itself must stay reachable when only one of its comments is deleted' unless post_after_solo_delete.code == '200'
+  if post_after_solo_delete.body.include?("id=\"comment-#{comment_id}\"")
+    raise 'the soft-deleted comment should no longer show up on its (still live) post'
+  end
+  unless Post.find_by!(slug: post_id).comments_count == comments_count_before_solo_delete - 1
+    raise 'deleting one comment should decrement its post comments_count, independent of any post-level trash'
+  end
+  puts "GET #{post_path} -> post still live (200), the deleted comment is gone from it, comments_count decremented " \
+       '(nothing about the POST changed - Post itself was never touched)'
+
+  unless Like.where(likeable_type: 'Comment', likeable_id: comment_id.to_i).count.zero?
+    raise "deleting the comment should have cascaded (soft-deleted) its own Like via dependent: :destroy"
+  end
+  unless Like.only_deleted.where(likeable_type: 'Comment', likeable_id: comment_id.to_i).count == 1
+    raise "the comment's cascaded Like should be soft-deleted (only_deleted), not gone for good"
+  end
+
+  comments_trash_page = http.get('/comments/trash', 'Cookie' => cookie)
+  unless comments_trash_page.code == '200' && comments_trash_page.body.include?("id=\"comment-#{comment_id}\"")
+    raise "expected the comment author's own trash to list it, got #{comments_trash_page.code}"
+  end
+  unless comments_trash_page.body.include?('Hello from Prism')
+    raise "the comments trash page should label each row with its (still live) post's title"
+  end
+  puts "GET /comments/trash -> 200, deleted comment listed with a link back to its still-live post"
+
+  solo_restore_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  solo_restore = http.post("/comments/#{comment_id}/restore", solo_restore_body,
+                            'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  unless solo_restore.code == '302' && solo_restore['location'].to_s.end_with?('/comments/trash')
+    raise "expected the solo comment restore to redirect back to /comments/trash, got #{solo_restore.code}"
+  end
+  puts "POST /comments/#{comment_id}/restore with _method=PATCH -> #{solo_restore.code} Location=#{solo_restore['location']}"
+
+  post_after_solo_restore = http.get(post_path, 'Cookie' => cookie)
+  unless post_after_solo_restore.body.include?("id=\"comment-#{comment_id}\"")
+    raise 'the restored comment should be back on its post'
+  end
+  unless Post.find_by!(slug: post_id).comments_count == comments_count_before_solo_delete
+    raise 'restoring the comment should re-increment comments_count back to what it was'
+  end
+  unless Like.where(likeable_type: 'Comment', likeable_id: comment_id.to_i).count == 1
+    raise "restore(recursive: true) inside CommentsController#restore should have brought the comment's own Like back too"
+  end
+  puts "GET #{post_path} -> the restored comment (and its Like) are back, comments_count restored"
+
+  comments_trash_after_restore = http.get('/comments/trash', 'Cookie' => cookie)
+  if comments_trash_after_restore.body.include?("id=\"comment-#{comment_id}\"")
+    raise 'a restored comment must no longer show up in /comments/trash'
+  end
+  puts 'GET /comments/trash after restore -> the restored comment is no longer listed'
+
+  # AccountController#comments ("Your comments" nav link) - current_user.
+  # comments is the one call site in this app where Comment.where(user_id:
+  # ...) is NOT already chained off post.comments first, so it is the only
+  # place the comments.user_id secondary index (added this session) gets
+  # picked over the pre-existing comments.post_id one for the same query.
+  # comment_id is one of this user's OLDEST comments (created near the very
+  # start of this whole demo run) and the listing orders newest-first, same
+  # as every other activity feed in this app, so it lands on the LAST page
+  # rather than page 1 once this account has commented more than 10 times.
+  owner_id = Comment.find(comment_id.to_i).user_id
+  my_comments_last_page = (Comment.where(user_id: owner_id).count / 10.0).ceil
+  my_comments_page = http.get("/account/comments?page=#{my_comments_last_page}", 'Cookie' => cookie)
+  unless my_comments_page.code == '200' && my_comments_page.body.include?("id=\"comment-#{comment_id}\"")
+    raise "expected /account/comments (page #{my_comments_last_page}) to list the signed-in user's own " \
+          "restored comment, got #{my_comments_page.code}"
+  end
+  unless my_comments_page.body.include?('Hello from Prism')
+    raise "the account comments page should label each row with its post's title, same as /comments/trash"
+  end
+  puts "GET /account/comments -> 200, the signed-in user's own comment listed with its post's title"
+
+  puts '-' * 40
+  # _method=DELETE makes Request#request_method report DELETE even though
+  # this is a real HTTP POST, so this call never touches the logins/ip
+  # throttle (that discriminator checks for POST specifically) regardless
+  # of the .json extension exercising SessionController#destroy's JSON branch.
+  logout_body = URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token)
+  logout = http.post('/session.json', logout_body, 'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST /session.json with _method=DELETE (sign out) -> #{logout.code}"
+  raise "expected JSON sign-out to return 200, got #{logout.code}" unless logout.code == '200'
+  raise 'JSON sign-out response should carry a message' unless JSON.parse(logout.body)['message']
+  signed_out_cookie = cookie_from(logout)
+  cookie = signed_out_cookie unless signed_out_cookie.empty?
+
+  # Authenticatable#sign_out (remember_sessions: variant) destroys THIS
+  # device's own LoginSession row, so device A's OLD remember-me cookie
+  # captured earlier must stop working now, not remain valid until
+  # whatever calendar date it expires.
+  stale_remember_attempt = http.get('/posts/trash', 'Cookie' => remember_session_token_a)
+  unless stale_remember_attempt.code == '302' && stale_remember_attempt['location'].to_s.end_with?('/session/new')
+    raise "expected the OLD remember-me cookie to stop working after sign-out, got #{stale_remember_attempt.code}"
+  end
+  puts "GET /posts/trash with device A's now-stale remember-me cookie after sign-out -> " \
+       "#{stale_remember_attempt.code} (sign_out destroyed its LoginSession row, so a captured old cookie is dead)"
+
+  blocked_again = http.post(
+    '/posts', URI.encode_www_form('post[title]' => 'still blocked', 'authenticity_token' => token),
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie
+  )
+  puts "POST /posts after sign out -> #{blocked_again.code} Location=#{blocked_again['location']}"
+  unless blocked_again.code == '302' && blocked_again['location'].to_s.end_with?('/session/new')
+    raise "expected post#create to require authentication again after sign-out, got #{blocked_again.code}"
+  end
+
+  puts '-' * 40
+  puts 'hammering POST /session with bad credentials to exercise Prism::Middleware::RateLimiting'
+  login_attempt_body = URI.encode_www_form(
+    'user[email]' => 'writer@example.com', 'user[password]' => 'wrong password', 'authenticity_token' => token
+  )
+  # Three POST /session slots are already spent before this loop starts:
+  # device A's own sign-in plus devices B and C from the multi-device
+  # remember-me scene above (each a real POST /session.json, all from the
+  # same IP). So the throttle (limit: 5) trips two attempts earlier here
+  # than it would against a completely fresh IP. Attempt 1 goes through
+  # .json instead of the usual form post - same slot either way (the
+  # discriminator strips the extension), but it doubles as the
+  # JSON-format proof that a rejected login is a 401 with a JSON:API
+  # error, not the HTML branch's 422.
+  6.times do |i|
+    path = i.zero? ? '/session.json' : '/session'
+    attempt = http.post(path, login_attempt_body, 'Content-Type' => 'application/x-www-form-urlencoded',
+                                                    'Cookie' => cookie)
+    expected = if i.zero? then '401'
+               elsif i == 1 then '422'
+               else '429'
+               end
+    puts "  attempt #{i + 1}: POST #{path} -> #{attempt.code} (expected #{expected})"
+    raise "login attempt #{i + 1}: expected #{expected}, got #{attempt.code}" unless attempt.code == expected
+    if i.zero?
+      error = JSON.parse(attempt.body)['errors'].first
+      raise 'expected the JSON login rejection to point at the password attribute' unless error['source']['pointer'] == '/data/attributes/password'
+    end
+    raise 'the blocked attempt should carry a Retry-After header' if i == 2 && attempt['retry-after'].nil?
+  end
+
+  puts '-' * 40
+  puts 'hammering POST /users to exercise the signup throttle (limit 3/60s per IP)'
+  signup_attempt_body = URI.encode_www_form(
+    'user[email]' => 'writer@example.com', 'user[password]' => 'irrelevant',
+    'user[password_confirmation]' => 'irrelevant', 'authenticity_token' => token
+  )
+  # The demo user and the ownership-check user above each cost one of the
+  # 3 POST /users slots, so the throttle trips one attempt earlier here
+  # than it would against a completely fresh IP. Attempt 1 goes through
+  # .json to prove the duplicate-email rejection is a normal render_errors
+  # 422 (same shape a JSON client already gets from posts.json), not a
+  # special case just because it happens to come from a throttled action.
+  2.times do |i|
+    path = i.zero? ? '/users.json' : '/users'
+    attempt = http.post(path, signup_attempt_body, 'Content-Type' => 'application/x-www-form-urlencoded',
+                                                     'Cookie' => cookie)
+    expected = i.zero? ? '422' : '429'
+    puts "  attempt #{i + 1}: POST #{path} -> #{attempt.code} (expected #{expected})"
+    raise "signup attempt #{i + 1}: expected #{expected}, got #{attempt.code}" unless attempt.code == expected
+    if i.zero?
+      error = JSON.parse(attempt.body)['errors'].first
+      raise 'expected the JSON signup rejection to point at the email attribute' unless error['source']['pointer'] == '/data/attributes/email'
+    end
+    raise 'the blocked attempt should carry a Retry-After header' if i == 1 && attempt['retry-after'].nil?
+  end
 end
+
+puts '-' * 40
+puts "checking that add_index :users, :email, unique: true (db/migrate/20260907000002_add_index_on_users_email.rb) is a REAL storage-level constraint, not just the app-level validates :email, uniqueness: true above"
+existing_writer = User.find_by(email: 'writer@example.com')
+raise 'expected the writer@example.com user created earlier in this demo to still exist' unless existing_writer
+users_count_before_bypass = User.count
+# Model#save always calls #valid? first, which is exactly what the app-level
+# uniqueness validator above already covers - so the only way to prove the
+# INDEX (not the validator) is what actually stops a duplicate is to skip
+# the model layer entirely and hit Store#insert directly, the way a future
+# admin script, a data migration, or a second process racing past the
+# validator's own SELECT before either commits, all would.
+begin
+  User.store.insert(User.table_name, 'email' => existing_writer[:email])
+  raise 'expected the unique index on users.email to reject a duplicate row inserted directly through Store#insert, bypassing Model#valid? entirely'
+rescue Prism::Orm::Store::UniqueConstraintViolation => e
+  puts "  Store#insert with a duplicate encrypted email, bypassing Model validation entirely -> #{e.class}: #{e.message}"
+end
+raise 'the rejected bypass insert must not have left a phantom row behind' unless User.count == users_count_before_bypass
+
+puts '-' * 40
+puts 'checking examples/blog/log/development.log for real Instrumentation::LogSubscriber output'
+new_log_lines = File.read(log_path)[log_offset_before_requests..].to_s
+%w[sql.prism render_template.prism process_action.prism perform_job.prism deliver_mail.prism].each do |event_name|
+  raise "expected at least one #{event_name} line in #{log_path}" unless new_log_lines.include?("  #{event_name} (")
+end
+unless new_log_lines.include?('table="posts"')
+  raise "expected a sql.prism line touching the posts table in #{log_path}"
+end
+unless new_log_lines.include?('path="/"')
+  raise "expected a process_action.prism line for the homepage in #{log_path}"
+end
+unless new_log_lines.include?('job_class="Prism::Mailer::DeliveryJob"')
+  raise "expected a perform_job.prism line for the mailer delivery job in #{log_path}"
+end
+unless new_log_lines.include?('deliver_mail.prism') && new_log_lines.include?('delivery_method=:test')
+  raise "expected a deliver_mail.prism line for the notification email in #{log_path}"
+end
+puts "  log grew by #{new_log_lines.lines.count} lines, sql/render/process_action/perform_job/deliver_mail all present"
 
 server.stop
 puts '-' * 40
