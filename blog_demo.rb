@@ -1548,6 +1548,179 @@ Net::HTTP.start('127.0.0.1', port) do |http|
   unless moderator_view.body.include?('A brand new pending remark')
     raise "the post's own author (moderator) should see a pending comment even before approving it"
   end
+  puts "GET #{post_path} as the post's author -> sees reader2's still-pending comment (moderator sees " \
+       'everything on their own post, CommentPolicy#approve?/#reject? check the POST owner)'
+
+  puts '-' * 40
+  puts "checking AccountController#moderation (GET /account/moderation) - a cross-post moderation queue, " \
+       "gathering reader2's still-pending comment onto ONE page instead of the author having to open every " \
+       "post separately, and confirming add_index :posts, :user_id (db/migrate/20260907000009) plus the " \
+       "existing add_index :comments, :post_id (.../20260907000005) answer it without a single full table scan"
+  moderation_log_offset = File.size(log_path)
+  moderation_queue = http.get('/account/moderation', 'Cookie' => cookie)
+  raise "expected GET /account/moderation to succeed, got #{moderation_queue.code}" unless moderation_queue.code == '200'
+  unless moderation_queue.body.include?('A brand new pending remark') && moderation_queue.body.include?('Hello from Prism')
+    raise "expected the moderation queue to list reader2's pending comment alongside its post's title"
+  end
+  moderation_log_lines = File.read(log_path)[moderation_log_offset..].to_s
+  if moderation_log_lines.include?('operation="SELECT" table="posts"') || moderation_log_lines.include?('operation="SELECT" table="comments"')
+    raise 'expected AccountController#moderation (current_user.posts then Comment.pending.where(post_id: ...)) ' \
+          'to resolve entirely through indexes, not a full table scan'
+  end
+  unless moderation_log_lines.include?('operation="SELECT INDEX" table="posts" columns=["user_id"]')
+    raise 'expected current_user.posts (owned post ids) to hit the posts.user_id index'
+  end
+  unless moderation_log_lines.include?('operation="SELECT INDEX IN" table="comments" columns=["post_id"]')
+    raise 'expected Comment.pending.where(post_id: owned_post_ids) to hit the comments.post_id index via an ' \
+          'IN-list lookup, not a scan'
+  end
+  puts '  GET /account/moderation -> 200, sql.prism log shows SELECT INDEX on posts.user_id then SELECT INDEX ' \
+       'IN on comments.post_id - zero full scans across both index-backed steps'
+
+  reader2_forbidden_approve_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  reader2_forbidden_approve = http.post(
+    "/posts/#{post_id}/comments/#{pending_comment_id}/approve", reader2_forbidden_approve_body,
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => pending_comment_cookie
+  )
+  unless reader2_forbidden_approve.code == '302' && reader2_forbidden_approve['location'] == post_path
+    raise 'a non-owner (even the comment author themself) must not be able to approve their own comment, got ' \
+          "#{reader2_forbidden_approve.code} Location=#{reader2_forbidden_approve['location']}"
+  end
+  puts "POST /posts/#{post_id}/comments/#{pending_comment_id}/approve as reader2 (not the post's author) -> " \
+       "#{reader2_forbidden_approve.code} (CommentPolicy#approve? denied it, forbidden redirect back to the post)"
+
+  approve_pending_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  approve_pending = http.post(
+    "/posts/#{post_id}/comments/#{pending_comment_id}/approve", approve_pending_body,
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie
+  )
+  raise "expected the moderator's approval to redirect, got #{approve_pending.code}" unless approve_pending.code == '302'
+  approve_pending_cookie = cookie_from(approve_pending)
+  cookie = approve_pending_cookie unless approve_pending_cookie.empty?
+  puts "POST /posts/#{post_id}/comments/#{pending_comment_id}/approve as the post's author -> #{approve_pending.code}"
+
+  stranger_view_after_approval = http.get(post_path)
+  unless stranger_view_after_approval.body.include?('A brand new pending remark')
+    raise "an approved comment should now be visible to a signed-out stranger too"
+  end
+  if stranger_view_after_approval.body.include?('Pending approval')
+    raise 'an approved comment must no longer carry the pending badge'
+  end
+  puts "GET #{post_path} signed out -> reader2's comment is now visible to everyone, no more pending badge"
+
+  moderation_queue_after_approval = http.get('/account/moderation', 'Cookie' => cookie)
+  raise "expected GET /account/moderation to succeed, got #{moderation_queue_after_approval.code}" unless moderation_queue_after_approval.code == '200'
+  if moderation_queue_after_approval.body.include?('A brand new pending remark')
+    raise 'an approved comment must no longer show up in the moderation queue'
+  end
+  puts 'GET /account/moderation after approval -> the now-approved comment is no longer listed'
+
+  puts '-' * 40
+  puts 'comment moderation, the other outcome: reader2 posts a second comment and the post\'s ' \
+       'author REJECTS it instead of approving it'
+  second_pending_body = URI.encode_www_form(
+    'comment[author]' => 'Reader2', 'comment[body]' => 'A remark that will get rejected', 'authenticity_token' => token
+  )
+  second_pending = http.post("/posts/#{post_id}/comments", second_pending_body,
+                              'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => pending_comment_cookie)
+  raise "expected reader2's second comment to redirect, got #{second_pending.code}" unless second_pending.code == '302'
+  puts "POST /posts/#{post_id}/comments as reader2 -> #{second_pending.code} (status defaults to pending again)"
+
+  reader2_second_view = http.get(post_path, 'Cookie' => pending_comment_cookie)
+  unless reader2_second_view.body.include?('A remark that will get rejected') && reader2_second_view.body.include?('Pending approval')
+    raise "reader2 should see their own new comment pending, badge and all"
+  end
+  # posts#show orders comments by created_at desc, so this brand new
+  # comment is once again the first <li> on the page.
+  rejectable_comment_id = reader2_second_view.body[/id="comment-(\d+)"/, 1]
+  raise "could not find reader2's second comment id on the post page" unless rejectable_comment_id
+
+  reader2_forbidden_reject_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  reader2_forbidden_reject = http.post(
+    "/posts/#{post_id}/comments/#{rejectable_comment_id}/reject", reader2_forbidden_reject_body,
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => pending_comment_cookie
+  )
+  unless reader2_forbidden_reject.code == '302' && reader2_forbidden_reject['location'] == post_path
+    raise 'a non-owner (even the comment author themself) must not be able to reject their own comment, got ' \
+          "#{reader2_forbidden_reject.code} Location=#{reader2_forbidden_reject['location']}"
+  end
+  puts "POST /posts/#{post_id}/comments/#{rejectable_comment_id}/reject as reader2 (not the post's author) -> " \
+       "#{reader2_forbidden_reject.code} (CommentPolicy#reject? denied it, forbidden redirect back to the post)"
+
+  reject_pending_body = URI.encode_www_form('_method' => 'PATCH', 'authenticity_token' => token)
+  reject_pending = http.post(
+    "/posts/#{post_id}/comments/#{rejectable_comment_id}/reject", reject_pending_body,
+    'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie
+  )
+  raise "expected the moderator's rejection to redirect, got #{reject_pending.code}" unless reject_pending.code == '302'
+  reject_pending_cookie = cookie_from(reject_pending)
+  cookie = reject_pending_cookie unless reject_pending_cookie.empty?
+  puts "POST /posts/#{post_id}/comments/#{rejectable_comment_id}/reject as the post's author -> #{reject_pending.code}"
+
+  stranger_view_after_rejection = http.get(post_path)
+  if stranger_view_after_rejection.body.include?('A remark that will get rejected')
+    raise 'a rejected comment must stay invisible to a signed-out stranger, same as a pending one'
+  end
+  puts "GET #{post_path} signed out -> the rejected comment stays hidden (Comment.visible_to only " \
+       'admits approved comments or the viewer\'s own)'
+
+  author_view_after_rejection = http.get(post_path, 'Cookie' => pending_comment_cookie)
+  unless author_view_after_rejection.body.include?('A remark that will get rejected') &&
+         author_view_after_rejection.body.include?('Rejected')
+    raise "the rejected comment's own author should still see it, now carrying the \"Rejected\" badge"
+  end
+  puts "GET #{post_path} as reader2 (the comment's own author) -> sees their own rejected comment, " \
+       'badge and all (Comment.visible_to admits their own regardless of status)'
+
+  moderator_view_after_rejection = http.get(post_path, 'Cookie' => cookie)
+  reject_path = "/posts/#{post_id}/comments/#{rejectable_comment_id}/reject"
+  approve_path = "/posts/#{post_id}/comments/#{rejectable_comment_id}/approve"
+  raise 'a rejected comment must no longer offer the moderator a Reject button' if moderator_view_after_rejection.body.include?(reject_path)
+  unless moderator_view_after_rejection.body.include?(approve_path)
+    raise 'a rejected comment should still offer the moderator an Approve button (it can still be reconsidered)'
+  end
+  puts "GET #{post_path} as the post's author -> the Reject button for this comment is gone, Approve is still " \
+       "offered (Comment#rejected? flips exactly one of the two buttons)"
+
+  delete_body = URI.encode_www_form('_method' => 'DELETE', 'authenticity_token' => token)
+  destroy = http.post(post_path, delete_body,
+                       'Content-Type' => 'application/x-www-form-urlencoded', 'Cookie' => cookie)
+  puts "POST #{post_path} with _method=DELETE -> #{destroy.code} Location=#{destroy['location']}"
+
+  gone = http.get(post_path, 'Cookie' => cookie)
+  puts "GET #{post_path} after delete -> #{gone.code} (expected 404, dependent comment cascaded away too)"
+  raise 'post should be gone after destroy' unless gone.code == '404'
+  # Post.acts_as_paranoid: #destroy above only stamped deleted_at, it did
+  # not remove the row (or, thanks to Post#remove_cover_file's
+  # soft_deleting? guard, the uploaded cover file) - both are still there
+  # for #restore below to bring back, unlike a plain hard delete.
+  raise "soft-deleted post's cover file should NOT have been removed: #{cover_file}" unless File.exist?(cover_file)
+  puts "soft-deleted post kept its cover file on disk (#{File.basename(cover_file)}), only stamped deleted_at"
+
+  # Comment and Like are acts_as_paranoid too now, so the dependent: :destroy
+  # cascades above soft-deleted them along with the post instead of removing
+  # them for real - hidden from the default scope exactly like a trashed
+  # post is, but still sitting in only_deleted for #restore(recursive: true)
+  # below to bring back. post_row_id (resolved once, way up where post_id
+  # itself was captured) is still valid here - a post's own numeric row id
+  # never changes across its own trash/restore cycle.
+  unless Like.where(likeable_type: 'Post', likeable_id: post_row_id).count.zero?
+    raise "trashing the post should have hidden its own Like row from the default scope"
+  end
+  unless Like.only_deleted.where(likeable_type: 'Post', likeable_id: post_row_id).count == 1
+    raise "trashing the post should have soft-deleted (not removed) its own Like row"
+  end
+  unless Comment.where(id: comment_id.to_i).count.zero?
+    raise "trashing the post should have hidden its cascaded comment from the default scope"
+  end
+  unless Comment.only_deleted.where(id: comment_id.to_i).count == 1
+    raise "trashing the post should have soft-deleted (not removed) its cascaded comment"
+  end
+  unless Like.only_deleted.where(likeable_type: 'Comment', likeable_id: comment_id.to_i).count == 1
+    raise "trashing the post should have recursively soft-deleted its cascaded comment's own Like too"
+  end
+  puts 'Like/Comment rows under the trashed post are hidden but not gone (only_deleted still finds them, ' \
+       'polymorphic dependent: :destroy through a soft-delete)'
 end
 
 server.stop
