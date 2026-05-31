@@ -1,0 +1,21 @@
+<h1><%= t('account.heading') %></h1>
+
+<% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<% form_for(user, url: '/account', method: :patch) do |f| %>
+  <p>
+    <%== f.label(:email, t('account.email_label')) %>
+    <%== f.email_field(:email) %>
+    <%== f.error_messages(:email) %>
+  </p>
+  <%== f.submit(t('account.submit')) %>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:root)) %></p>

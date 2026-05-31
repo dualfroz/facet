@@ -1,0 +1,25 @@
+<h1><%= t('account.comments_heading') %></h1>
+
+<% if comments.none? %>
+<p><%= t('account.comments_empty') %></p>
+<% else %>
+<ul class="comments mine">
+<% comments.each do |comment| %>
+<li class="comment" id="comment-<%= comment.id %>">
+  <p>
+    <% if comment_post_linkable?(comment) %>
+    <%== link_to(comment_post_label(comment), url_for(:post, slug: comment_post_slug(comment))) %>
+    <% else %>
+    <%= comment_post_label(comment) %>
+    <% end %>
+    <span class="comment-status"><%= t("comments.status_#{comment.status}") %></span>
+  </p>
+  <p><%= comment.body %></p>
+</li>
+<% end %>
+</ul>
+<% end %>
+
+<%== paginate(comments, path: ->(page) { "#{url_for(:account_comments)}?page=#{page}" }) %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>

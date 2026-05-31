@@ -1,0 +1,22 @@
+<h1><%= t('comments.edit_heading') %></h1>
+
+<% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<% form_for(comment, url: url_for(:comment, post_id: post.to_param, id: comment.id)) do |f| %>
+  <%== f.hidden_field(:lock_version) %>
+  <p>
+    <%== f.label(:body, t('comments.body_label')) %>
+    <%== f.text_area(:body) %>
+    <%== f.error_messages(:body) %>
+  </p>
+  <%== f.submit(t('comments.update_submit')) %>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:post, slug: post.to_param)) %></p>

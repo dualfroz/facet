@@ -1,0 +1,12 @@
+<h1><%= t('password_resets.request_heading') %></h1>
+<p><%= t('password_resets.request_hint') %></p>
+
+<% form_for(nil, url: url_for(:password_resets), method: :post, object_name: 'password_reset') do |f| %>
+  <p>
+    <%== f.label(:email, t('password_resets.email_label')) %>
+    <%== f.email_field(:email) %>
+  </p>
+  <%== f.submit(t('password_resets.request_submit')) %>
+<% end %>
+
+<p><%== link_to(t('sessions.sign_in'), url_for(:new_session)) %></p>

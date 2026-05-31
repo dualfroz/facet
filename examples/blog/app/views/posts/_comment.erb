@@ -1,0 +1,28 @@
+<li class="comment" id="comment-<%= comment.id %>">
+  <strong><%= comment.author %></strong>
+  <% unless comment.approved? %>
+  <span class="comment-status"><%= t("comments.status_#{comment.status}") %></span>
+  <% end %>
+  <p><%= comment.body %></p>
+  <p>
+    <%= t('likes.count', count: likes_count(comment)) %>
+    <% if user_signed_in? %>
+    <% own_like = current_user_like(comment) %>
+    <% if own_like %>
+    <%== button_to(t('likes.unlike'), "/likes/#{own_like.id}", method: :delete) %>
+    <% else %>
+    <%== button_to(t('likes.like'), "/likes?likeable_type=Comment&likeable_id=#{comment.id}") %>
+    <% end %>
+    <% end %>
+  </p>
+  <% if current_user && current_user.id == comment.user_id %>
+  <%== link_to(t('comments.edit_link'), url_for(:edit_comment, post_id: post.to_param, id: comment.id)) %>
+  <%== button_to(t('comments.delete'), "/posts/#{post.to_param}/comments/#{comment.id}", method: :delete, data_confirm: t('comments.confirm_delete')) %>
+  <% end %>
+  <% if current_user && current_user.id == post.user_id && !comment.approved? %>
+  <%== button_to(t('comments.approve'), "/posts/#{post.to_param}/comments/#{comment.id}/approve", method: :patch) %>
+  <% end %>
+  <% if current_user && current_user.id == post.user_id && !comment.rejected? %>
+  <%== button_to(t('comments.reject'), "/posts/#{post.to_param}/comments/#{comment.id}/reject", method: :patch) %>
+  <% end %>
+</li>

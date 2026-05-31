@@ -1,0 +1,16 @@
+<h1><%= t('comments.heading') %></h1>
+<p><%== link_to(post.title, url_for(:post, slug: post.to_param)) %></p>
+
+<% if comments.none? %>
+<p><%= t('comments.empty') %></p>
+<% else %>
+<ul class="comments">
+<% comments.each do |comment| %>
+<%== partial('posts/comment', locals: { comment: comment, post: post }) %>
+<% end %>
+</ul>
+<% end %>
+
+<%== paginate(comments, path: ->(page) { "#{url_for(:comments, post_id: post.to_param)}?page=#{page}" }) %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>

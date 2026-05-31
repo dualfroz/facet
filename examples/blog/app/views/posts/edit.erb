@@ -1,0 +1,56 @@
+<h1><%= t('posts.edit_heading') %></h1>
+
+<% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<% form_for(post, url: url_for(:post, slug: post.to_param)) do |f| %>
+  <%== f.hidden_field(:lock_version) %>
+  <p>
+    <%== f.label(:title, t('posts.title_label')) %>
+    <%== f.text_field(:title) %>
+    <%== f.error_messages(:title) %>
+  </p>
+  <p>
+    <%== f.label(:body, t('posts.body_label')) %>
+    <%== f.text_area(:body) %>
+    <%== f.error_messages(:body) %>
+  </p>
+  <p>
+    <%== f.check_box(:featured) %>
+    <%== f.label(:featured, t('posts.featured_label')) %>
+  </p>
+  <p>
+    <%== f.label(:giveaway_slots, t('claims.giveaway_slots_label')) %>
+    <%== f.text_field(:giveaway_slots) %>
+    <%== f.error_messages(:giveaway_slots) %>
+  </p>
+  <%== f.submit(t('posts.update_submit')) %>
+  <%== f.submit(t('posts.preview_submit'), formaction: url_for(:preview_post, slug: post.to_param)) %>
+
+  <h2><%= t('posts.moderate_comments_heading') %></h2>
+  <% moderated_comments = post.comments.order(:created_at, :desc).to_a %>
+  <% if moderated_comments.empty? %>
+  <p><%= t('posts.moderate_comments_empty') %></p>
+  <% else %>
+  <% f.fields_for(:comments, moderated_comments) do |cf| %>
+    <p class="moderated-comment">
+      <%== cf.hidden_field(:id) %>
+      <%== cf.label(:body, t('posts.moderate_comment_body_label')) %>
+      <%== cf.text_area(:body) %>
+      <%== cf.error_messages(:body) %>
+      <label>
+        <%== cf.check_box(:_destroy) %>
+        <%= t('posts.moderate_comment_remove_label') %>
+      </label>
+    </p>
+  <% end %>
+  <% end %>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>

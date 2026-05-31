@@ -1,21 +1,77 @@
-<h1>Blog</h1>
+<% content_for(:sidebar) do %>
+  <%# Deliberately NOT keyed on current_user, unlike the fresh_when etag on this same action: the 5 most recent post titles/links are identical for every viewer, and the signed-in-as banner + new-post form that DO vary per viewer render outside this block, never inside the cached fragment. See prism-postep.md session 62/64. %>
+  <% cache(:recent_posts_sidebar, expires_in: 60) do %>
+    <h2><%= t('posts.recent_heading') %></h2>
+    <ul>
+      <% Post.order(:created_at, :desc).limit(5).each do |recent| %>
+        <li><%== link_to(recent.title, url_for(:post, slug: recent.to_param)) %></li>
+      <% end %>
+    </ul>
+  <% end %>
+<% end %>
+
 <% if notice %>
 <p class="notice"><%= notice %></p>
 <% end %>
 <% unless errors.empty? %>
+<h2><%= t('posts.errors_heading') %></h2>
 <ul class="errors">
 <% errors.each do |message| %>
 <li><%= message %></li>
 <% end %>
 </ul>
 <% end %>
-<form method="post" action="/posts">
-  <input type="text" name="title" placeholder="Title">
-  <textarea name="body" placeholder="Body"></textarea>
-  <button type="submit">Create post</button>
-</form>
+
+<% if user_signed_in? %>
+<h2><%= t('posts.new_post_heading') %></h2>
+<% form_for(new_post, url: url_for(:posts), html: { enctype: 'multipart/form-data' }) do |f| %>
+  <p>
+    <%== f.label(:title, t('posts.title_label')) %>
+    <%== f.text_field(:title) %>
+    <%== f.error_messages(:title) %>
+  </p>
+  <p>
+    <%== f.label(:body, t('posts.body_label')) %>
+    <%== f.text_area(:body) %>
+    <%== f.error_messages(:body) %>
+  </p>
+  <p>
+    <%== f.label(:cover, t('posts.cover_label')) %>
+    <%== f.tag(:input, type: 'file', name: 'post[cover]', id: 'post_cover') %>
+  </p>
+  <p>
+    <%== f.check_box(:featured) %>
+    <%== f.label(:featured, t('posts.featured_label')) %>
+  </p>
+  <p>
+    <%== f.label(:giveaway_slots, t('claims.giveaway_slots_label')) %>
+    <%== f.text_field(:giveaway_slots) %>
+    <%== f.error_messages(:giveaway_slots) %>
+  </p>
+  <%== f.submit(t('posts.submit')) %>
+<% end %>
+
+<h2><%= t('posts.import_heading') %></h2>
+<% form_for(Post.new, url: url_for(:import_posts), method: :post, html: { enctype: 'multipart/form-data' }) do |f| %>
+  <p>
+    <%== f.label(:file, t('posts.import_label')) %>
+    <%== f.tag(:input, type: 'file', name: 'file', id: 'post_file', accept: '.csv,text/csv') %>
+  </p>
+  <%== f.submit(t('posts.import_submit')) %>
+<% end %>
+<% end %>
+
+<p class="post-filters">
+  <%== link_to(t('posts.filter_all'), url_for(:posts)) %>
+  | <%== link_to(t('posts.filter_recent', days: 7), "#{url_for(:posts)}?days=7") %>
+  | <%== link_to(t('posts.filter_recent', days: 30), "#{url_for(:posts)}?days=30") %>
+  | <%== link_to(t('posts.filter_featured'), "#{url_for(:posts)}?featured=1") %>
+</p>
+
 <ul class="posts">
 <% posts.each do |post| %>
-<%== partial('post', locals: { post: post }) %>
+<%== partial('post', locals: { post: post, featured_only: featured_only }) %>
 <% end %>
 </ul>
+
+<%== paginate(posts, path: ->(page) { "#{url_for(:posts)}?page=#{page}#{days.positive? ? "&days=#{days}" : ''}#{featured_only ? '&featured=1' : ''}" }) %>

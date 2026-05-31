@@ -1,0 +1,20 @@
+<% unless errors.empty? %>
+<ul class="errors">
+<% errors.each do |message| %>
+<li><%= message %></li>
+<% end %>
+</ul>
+<% end %>
+
+<h1><%= t('password_resets.reset_heading') %></h1>
+<% form_for(nil, url: url_for(:password_reset, token: token), method: :patch, object_name: 'password_reset') do |f| %>
+  <p>
+    <%== f.label(:password, t('password_resets.new_password_label')) %>
+    <%== f.password_field(:password) %>
+  </p>
+  <p>
+    <%== f.label(:password_confirmation, t('password_resets.confirm_password_label')) %>
+    <%== f.password_field(:password_confirmation) %>
+  </p>
+  <%== f.submit(t('password_resets.reset_submit')) %>
+<% end %>

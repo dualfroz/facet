@@ -1,0 +1,31 @@
+<% if notice %>
+<p class="notice"><%= notice %></p>
+<% end %>
+
+<h1><%= t('login_sessions.heading') %></h1>
+
+<ul class="login-sessions">
+<% if current_session %>
+<li class="login-session current" id="login-session-<%= current_session.id %>">
+  <%= t('login_sessions.this_device', created_at: current_session.created_at) %>
+  <br><small><%= device_detail_for(current_session) %></small>
+</li>
+<% end %>
+<% other_sessions.each do |login_session| %>
+<li class="login-session" id="login-session-<%= login_session.id %>">
+  <%= t('login_sessions.other_device', created_at: login_session.created_at) %>
+  <br><small><%= device_detail_for(login_session) %></small>
+  <%== button_to(t('login_sessions.revoke'), url_for(:login_session, id: login_session.id), method: :delete,
+                 data_confirm: t('login_sessions.confirm_revoke')) %>
+</li>
+<% end %>
+</ul>
+
+<% if other_sessions.empty? %>
+<p><%= t('login_sessions.no_other_devices') %></p>
+<% else %>
+<%== button_to(t('login_sessions.sign_out_others'), url_for(:sign_out_others_login_sessions), method: :post,
+               data_confirm: t('login_sessions.confirm_sign_out_others')) %>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>

@@ -1,4 +1,23 @@
-<li class="post" id="post-<%= post.id %>">
-  <h2><%= post.title %></h2>
+<li class="post" id="post-<%= post.to_param %>">
+  <h2><%== link_to(post.title, url_for(:post, slug: post.to_param)) %></h2>
+  <% if post.featured %>
+  <p class="featured-badge"><%= t('posts.featured_badge') %></p>
+  <% end %>
+  <% if featured_only && post.featured && user_signed_in? && current_user.id == post.user_id %>
+  <p class="featured-reorder">
+    <% unless post.first_in_list? %>
+    <%== button_to(t('posts.move_up'), url_for(:move_up_post, slug: post.to_param), method: :patch) %>
+    <% end %>
+    <% unless post.last_in_list? %>
+    <%== button_to(t('posts.move_down'), url_for(:move_down_post, slug: post.to_param), method: :patch) %>
+    <% end %>
+  </p>
+  <% end %>
+  <% if post.cover %>
+  <p><img src="/uploads/<%= post.cover %>" alt="<%= post.title %>" width="120"></p>
+  <% end %>
   <p><%= post.body %></p>
+  <p><%= t('posts.comments_count', count: post.comments_count) %></p>
+  <p class="last-activity"><%= t('posts.last_activity', when: l(post.updated_at)) %></p>
+  <p><%== link_to(t('posts.read_more'), url_for(:post, slug: post.to_param)) %></p>
 </li>

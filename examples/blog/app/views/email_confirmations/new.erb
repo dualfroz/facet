@@ -1,0 +1,12 @@
+<h1><%= t('email_confirmations.request_heading') %></h1>
+<p><%= t('email_confirmations.request_hint') %></p>
+
+<% form_for(nil, url: url_for(:email_confirmations), method: :post, object_name: 'email_confirmation') do |f| %>
+  <p>
+    <%== f.label(:email, t('email_confirmations.email_label')) %>
+    <%== f.email_field(:email) %>
+  </p>
+  <%== f.submit(t('email_confirmations.request_submit')) %>
+<% end %>
+
+<p><%== link_to(t('sessions.sign_in'), url_for(:new_session)) %></p>

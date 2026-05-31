@@ -1,0 +1,27 @@
+<% if notice %>
+<p class="notice"><%= notice %></p>
+<% end %>
+
+<h1><%= t('comments.trash_heading') %></h1>
+
+<% if comments.empty? %>
+<p><%= t('comments.trash_empty') %></p>
+<% else %>
+<ul class="comments trash">
+<% comments.each do |comment| %>
+<li class="comment" id="comment-<%= comment.id %>">
+  <p>
+    <% if comment_post_linkable?(comment) %>
+    <%== link_to(comment_post_label(comment), url_for(:post, slug: comment_post_slug(comment))) %>
+    <% else %>
+    <%= comment_post_label(comment) %>
+    <% end %>
+  </p>
+  <p><%= comment.body %></p>
+  <%== button_to(t('comments.restore'), url_for(:restore_comment, id: comment.id), method: :patch) %>
+</li>
+<% end %>
+</ul>
+<% end %>
+
+<p><%== link_to(t('posts.back_to_list'), url_for(:posts)) %></p>
