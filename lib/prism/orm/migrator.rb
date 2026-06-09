@@ -20,6 +20,15 @@ module Prism
         entries.reject { |entry| applied.include?(entry.version) }
       end
 
+      # Pairs every migration file on disk with whether it has been applied
+      # to this store, in the same order `entries`/`pending` use - the data
+      # `prism db:status` (like `rails db:migrate:status`) prints, but kept
+      # here so it is available to any caller, not just the CLI.
+      def status
+        applied = @store.applied_migrations
+        entries.map { |entry| [entry, applied.include?(entry.version)] }
+      end
+
       def migrate!
         applied = pending.map { |entry| apply(entry) }
         applied.map(&:version)

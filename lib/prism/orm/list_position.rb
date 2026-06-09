@@ -148,3 +148,139 @@ module Prism
         self
       end
 
+      # General-purpose reposition for an already-persisted record: shifts
+      # every sibling strictly between the old and new position by one
+      # (toward the gap this move opens up) inside a single transaction,
+      # then moves this record itself - the same three-step shift the gem
+      # does with update_all, just expressed as one increment_counter call
+      # per affected row since this Store has no bulk UPDATE.
+      #
+      # Also wrapped in with_lock - a caller reaching this directly (not
+      # through move_to_top/move_to_bottom) hits the same TOCTOU window as
+      # move_higher/move_lower did: old_position used to be read from
+      # whatever self happened to hold in memory, which could already be
+      # stale by the time the write transaction opened. Nesting inside an
+      # already-open with_lock (as move_to_top/move_to_bottom now do) is
+      # safe - Store#within_transaction/Pessimistic#lock! are both
+      # reentrant on an already-open transaction, so this does not try to
+      # take the file lock twice.
+      def insert_at(new_position)
+        raise RecordNotFound, "cannot reposition a #{self.class} that is not persisted" unless persisted?
+        column = self.class.list_position_column
+        with_lock do
+          old_position = list_position
+          next if old_position == new_position
+
+          if old_position.nil?
+            shift_siblings_at_or_after(new_position, by: 1)
+          elsif new_position < old_position
+            list_scope_relation.where(column => { gte: new_position, lt: old_position }).each do |sibling|
+              self.class.store.increment_counter(self.class.table_name, sibling.id, column, 1) unless sibling.id == id
+            end
+          else
+            list_scope_relation.where(column => { gt: old_position, lte: new_position }).each do |sibling|
+              self.class.store.increment_counter(self.class.table_name, sibling.id, column, -1) unless sibling.id == id
+            end
+          end
+          self.class.store.increment_counter(self.class.table_name, id, column, new_position - old_position.to_i)
+        end
+        @attributes[column] = new_position
+        self
+      end
+
+      private
+
+      def swap_list_position_with(other)
+        column = self.class.list_position_column
+        self_position = list_position
+        other_position = other[column]
+        self.class.transaction do
+          self.class.store.increment_counter(self.class.table_name, other.id, column, self_position - other_position)
+          self.class.store.increment_counter(self.class.table_name, id, column, other_position - self_position)
+        end
+        other.instance_variable_get(:@attributes)[column] = self_position
+        @attributes[column] = other_position
+      end
+
+      # Shared by insert_at's "no prior position" branch and by the
+      # before_create hook when a caller assigns a position explicitly
+      # (e.g. Model.create!(position: 2, ...)) instead of relying on the
+      # bottom-of-list default - existing rows at or past the target slide
+      # down to make room for the record about to occupy it.
+      def shift_siblings_at_or_after(position, by:)
+        column = self.class.list_position_column
+        list_scope_relation.where(column => { gte: position }).each do |sibling|
+          self.class.store.increment_counter(self.class.table_name, sibling.id, column, by) unless persisted? && sibling.id == id
+        end
+      end
+
+      def prism_list_position_append_on_create
+        column = self.class.list_position_column
+        if list_position
+          shift_siblings_at_or_after(list_position, by: 1)
+        else
+          self[column] = (list_scope_relation.maximum(column) || 0) + 1
+        end
+      end
+
+      # Fires only when the scope column itself is dirty (e.g. Post#featured
+      # flipped by an edit form - see examples/blog) - an ordinary update
+      # that never touches the scope column leaves list_position completely
+      # alone. attribute_was(scope_column) reads the PRE-change value while
+      # this hook still runs inside the same before_update Dirty sees it in
+      # (see Dirty#attribute_was), which is why the "close the gap" query
+      # below is built by hand against that old value instead of going
+      # through list_scope_relation - that helper always reads self's
+      # CURRENT (already-reassigned) scope value, which by now is the new
+      # one this record is about to join, not the one it is leaving.
+      def prism_list_position_switch_scope_on_update
+        scope_column = self.class.list_position_scope_column
+        return unless scope_column && attribute_changed?(scope_column)
+        column = self.class.list_position_column
+        old_scope_value = attribute_was(scope_column)
+        old_position = self[column]
+        if old_position
+          self.class.all.where(scope_column => old_scope_value, column => { gt: old_position }).each do |sibling|
+            self.class.store.increment_counter(self.class.table_name, sibling.id, column, -1)
+          end
+        end
+        # The store row this record occupies still holds the OLD scope
+        # value (this update has not been written yet), so a plain query
+        # for the new scope's current bottom naturally excludes self
+        # without needing to filter it out by id, same as
+        # prism_list_position_reappend_on_restore relies on for the same
+        # reason.
+        new_bottom = self.class.all.where(scope_column => self[scope_column]).maximum(column)
+        self[column] = (new_bottom || 0) + 1
+      end
+
+      # Runs for both a real delete and a paranoid soft-delete (Model#destroy
+      # runs after_destroy either way - see Paranoia) since in both cases
+      # the row stops showing up in list_scope_relation (paranoid_scope
+      # hides it, or it is just gone), so either way the gap it leaves
+      # needs closing the same way.
+      def prism_list_position_close_gap
+        pos = list_position
+        return unless pos
+        column = self.class.list_position_column
+        list_scope_relation.where(column => { gt: pos }).each do |sibling|
+          self.class.store.increment_counter(self.class.table_name, sibling.id, column, -1)
+        end
+      end
+
+      # A restored record's OLD position (untouched by soft-delete/restore,
+      # which only ever stamp/clear the paranoid column) may now collide
+      # with whatever slid down into that slot while it was trashed (see
+      # prism_list_position_close_gap above) - reappending it to the
+      # bottom, exactly like a fresh create, is the same call Rails
+      # paranoia + acts_as_list users hit this same way: a restored record
+      # does not reclaim its old spot, it rejoins at the end.
+      def prism_list_position_reappend_on_restore
+        column = self.class.list_position_column
+        new_position = (list_scope_relation.maximum(column) || 0) + 1
+        self.class.store.increment_counter(self.class.table_name, id, column, new_position - list_position.to_i)
+        @attributes[column] = new_position
+      end
+    end
+  end
+end

@@ -2,10 +2,11 @@ module Prism
   module Orm
     class Migration
       class TableDefinition
-        attr_reader :columns
+        attr_reader :columns, :indexes
 
         def initialize
           @columns = ['id']
+          @indexes = []
         end
 
         def column(name, _type = :string)
@@ -19,6 +20,10 @@ module Prism
         def timestamps
           column(:created_at)
           column(:updated_at)
+        end
+
+        def index(columns, unique: false, name: nil)
+          @indexes << { columns: Array(columns), unique: unique, name: name }
         end
       end
 
@@ -42,6 +47,9 @@ module Prism
         definition = TableDefinition.new
         yield(definition) if block_given?
         store.create_table(name, definition.columns)
+        definition.indexes.each do |index|
+          store.add_index(name, index[:columns], unique: index[:unique], name: index[:name])
+        end
       end
 
       def drop_table(name)
@@ -54,6 +62,14 @@ module Prism
 
       def remove_column(table, column)
         store.remove_column(table, column)
+      end
+
+      def add_index(table, columns, unique: false, name: nil)
+        store.add_index(table, columns, unique: unique, name: name)
+      end
+
+      def remove_index(table, columns_or_name)
+        store.remove_index(table, columns_or_name)
       end
     end
   end
