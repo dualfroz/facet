@@ -1,8 +1,39 @@
 module Prism
+  # Hash-like request parameter container: string/symbol keys are
+  # interchangeable everywhere (see #convert_key below).
   class Params < Hash
     def self.from(source)
       source.each_with_object(new) { |(key, value), acc| acc[key] = value }
     end
+
+    # Rack-style bracket expansion: turns a flat list of [key, value] pairs
+    # such as [["post[title]", "hi"], ["tags[]", "a"], ["tags[]", "b"]]
+    # (what a browser actually sends for a form built with
+    # Prism::FormBuilder's "object[attribute]" field names) into the nested
+    # Params/Array tree StrongParameters expects
+    # (params.require(:post).permit(:title), params['tags'] == ["a", "b"]).
+    def self.nested_from(pairs)
+      pairs.each_with_object(new) { |(key, value), acc| assign_pair(acc, key, value) }
+    end
+
+    def self.assign_pair(container, key, value)
+      segments = key.to_s.scan(/[^\[\]]+|\[\]/)
+      name = segments.shift
+      return if name.nil?
+      insert(container, name, segments, value)
+    end
+
+    def self.insert(container, key, remaining, value)
+      if remaining.empty?
+        container[key] = value
+      elsif remaining.first == '[]'
+        (container[key] ||= []) << value
+      else
+        container[key] ||= new
+        insert(container[key], remaining.shift, remaining, value)
+      end
+    end
+    private_class_method :insert
 
     def [](key)
       super(convert_key(key))
@@ -26,6 +57,10 @@ module Prism
     alias_method :has_key?, :key?
     alias_method :include?, :key?
     alias_method :member?, :key?
+
+    def delete(key, &block)
+      super(convert_key(key), &block)
+    end
 
     private
 
