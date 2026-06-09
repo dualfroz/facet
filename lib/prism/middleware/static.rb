@@ -20,7 +20,7 @@ module Prism
         file = resolve(env['PATH_INFO'])
         return @app.call(env) unless file
 
-        serve(file)
+        serve(file, head: method == 'HEAD', env: env)
       end
 
       private
@@ -35,10 +35,57 @@ module Prism
         candidate
       end
 
-      def serve(file)
-        body = File.binread(file)
+      def serve(file, head: false, env: {})
         type = ContentTypes.fetch(File.extname(file).downcase, 'application/octet-stream')
-        [200, { 'Content-Type' => type, 'Content-Length' => body.bytesize.to_s }, [body]]
+        etag, last_modified = StaticCache.weak_validators(File.size(file), File.mtime(file))
+        Static.respond_with_range(file, type, head: head, env: env, etag: etag, last_modified: last_modified)
+      end
+
+      # Shared by Middleware::Assets so both give identical conditional-GET
+      # (304) and Range/206/416 behavior instead of duplicating this
+      # branching twice. `etag`/`last_modified` are already-formatted header
+      # values chosen by the caller (Assets can offer a strong,
+      # fingerprint-derived ETag; plain Static files only get a cheap weak
+      # one - see StaticCache).
+      def self.respond_with_range(file, type, head: false, env: {}, etag: nil, last_modified: nil)
+        size = File.size(file)
+        headers = { 'Content-Type' => type, 'Accept-Ranges' => 'bytes' }
+        headers['ETag'] = etag if etag
+        headers['Last-Modified'] = last_modified if last_modified
+
+        if StaticCache.not_modified?(env, etag, last_modified)
+          return [304, cache_only_headers(etag, last_modified), []]
+        end
+
+        range = env['HTTP_RANGE']
+        range = nil unless StaticCache.range_applicable?(env, etag, last_modified)
+
+        parsed = HttpRange.parse(range, size)
+        if parsed == :unsatisfiable
+          headers['Content-Range'] = "bytes */#{size}"
+          return [416, headers, []]
+        end
+
+        if parsed.nil?
+          headers['Content-Length'] = size.to_s
+          body = head ? [] : [File.binread(file)]
+          return [200, headers, body]
+        end
+
+        headers['Content-Range'] = "bytes #{parsed.start}-#{parsed.finish}/#{size}"
+        headers['Content-Length'] = parsed.length.to_s
+        body = head ? [] : [HttpRange.read_slice(file, parsed)]
+        [206, headers, body]
+      end
+
+      # A 304 response must not carry entity headers like Content-Type/
+      # Content-Length (there is no body), only the cache validators the
+      # client can keep comparing against next time.
+      def self.cache_only_headers(etag, last_modified)
+        headers = {}
+        headers['ETag'] = etag if etag
+        headers['Last-Modified'] = last_modified if last_modified
+        headers
       end
     end
   end

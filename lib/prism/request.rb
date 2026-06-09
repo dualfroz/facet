@@ -6,8 +6,10 @@ module Prism
       @env = env
     end
 
+    OverridableMethods = %w[PUT PATCH DELETE].freeze
+
     def request_method
-      @env['REQUEST_METHOD']
+      @request_method ||= compute_request_method
     end
 
     def path
@@ -22,10 +24,20 @@ module Prism
       @env['CONTENT_TYPE']
     end
 
+    def user_agent
+      @env['HTTP_USER_AGENT']
+    end
+
+    def remote_addr
+      @env['REMOTE_ADDR']
+    end
+
     def body
       @body ||= begin
         input = @env['rack.input']
-        input ? input.read : ''
+        content = input ? input.read : ''
+        input.rewind if input.respond_to?(:rewind)
+        content
       end
     end
 
@@ -67,11 +79,27 @@ module Prism
       end
     end
 
+    # Negotiated response format: an explicit `.json` path/query extension
+    # wins, otherwise it falls back to the Accept header, defaulting to
+    # :html when nothing else matches (mirrors Rails' request.format).
+    def format
+      explicit = path_params['format'] || query_params['format']
+      return explicit.to_s.to_sym unless explicit.nil? || explicit.to_s.empty?
+      Mime.best_from_accept(headers['Accept']) || :html
+    end
+
     private
+
+    def compute_request_method
+      actual = @env['REQUEST_METHOD']
+      return actual unless actual == 'POST'
+      override = (@env['HTTP_X_HTTP_METHOD_OVERRIDE'] || body_params['_method']).to_s.upcase
+      OverridableMethods.include?(override) ? override : actual
+    end
 
     def parse_query(string)
       return Params.new if string.empty?
-      Params.from(URI.decode_www_form(string).to_h)
+      Params.nested_from(URI.decode_www_form(string))
     rescue ArgumentError
       Params.new
     end
@@ -82,7 +110,9 @@ module Prism
         parsed = JSON.parse(body)
         parsed.is_a?(Hash) ? Params.from(parsed) : Params.from('_json' => parsed)
       elsif content_type&.include?('application/x-www-form-urlencoded')
-        Params.from(URI.decode_www_form(body).to_h)
+        Params.nested_from(URI.decode_www_form(body))
+      elsif Multipart.multipart?(content_type)
+        Multipart.parse(body, Multipart.boundary_from(content_type))
       else
         Params.new
       end

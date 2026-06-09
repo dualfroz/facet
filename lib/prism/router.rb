@@ -2,9 +2,16 @@ module Prism
   class PathMatcher
     attr_reader :keys, :pattern
 
-    def initialize(pattern)
+    # constraints: { param_name => Regexp } narrows a dynamic segment's match.
+    # format: true appends an optional trailing ".xml"/".json"/... capture
+    # (Rails' implicit `(.:format)`) and reserves the segment class [^/.]+
+    # so dynamic segments no longer swallow the extension. Left off by
+    # default so plain routes keep matching literal dots exactly as before.
+    def initialize(pattern, constraints: {}, format: false)
       @pattern = pattern
       @keys = []
+      @constraints = constraints.transform_keys(&:to_s)
+      @format = format && !pattern.include?('*')
       @regex = compile(pattern)
     end
 
@@ -37,8 +44,9 @@ module Prism
       source = +'\A'
       pattern.scan(/:\w+|\*|[^:*]+/).each do |token|
         if token.start_with?(':')
-          @keys << token[1..]
-          source << '([^/]+)'
+          key = token[1..]
+          @keys << key
+          source << segment_source(key)
         elsif token == '*'
           @keys << 'splat'
           source << '(.*?)'
@@ -46,8 +54,18 @@ module Prism
           source << Regexp.escape(token)
         end
       end
+      if @format
+        @keys << 'format'
+        source << '(?:\.([^/.]+))?'
+      end
       source << '\z'
       Regexp.new(source)
+    end
+
+    def segment_source(key)
+      constraint = @constraints[key]
+      return "(#{constraint.source})" if constraint
+      @format ? '([^/.]+)' : '([^/]+)'
     end
 
     def extract(data)
@@ -55,6 +73,7 @@ module Prism
       splats = []
       @keys.each_with_index do |key, index|
         value = data.captures[index]
+        next if value.nil?
         if key == 'splat'
           splats << value
         else
@@ -67,11 +86,12 @@ module Prism
   end
 
   class Route
-    attr_reader :method, :block, :name, :controller_name, :action_name
+    attr_reader :method, :block, :name, :controller_name, :action_name, :pattern
 
-    def initialize(method, pattern, block: nil, name: nil, to: nil)
+    def initialize(method, pattern, block: nil, name: nil, to: nil, constraints: {}, format: false)
       @method = method
-      @matcher = PathMatcher.new(pattern)
+      @pattern = pattern
+      @matcher = PathMatcher.new(pattern, constraints: constraints, format: format)
       @block = block
       @name = name&.to_sym
       @controller_name, @action_name = to&.split('#', 2)
@@ -92,15 +112,19 @@ module Prism
   end
 
   class Router
-    attr_reader :routes
+    attr_reader :routes, :mounts, :websockets
 
     def initialize
       @routes = []
       @named_routes = {}
+      @mounts = []
+      @websockets = {}
+      @websocket_options = {}
     end
 
-    def add(method, pattern, name: nil, to: nil, &block)
-      route = Route.new(method.to_s.upcase, pattern, block: block, name: name, to: to)
+    def add(method, pattern, name: nil, to: nil, constraints: {}, format: false, &block)
+      route = Route.new(method.to_s.upcase, pattern, block: block, name: name, to: to,
+                                                      constraints: constraints, format: format)
       @routes << route
       @named_routes[name.to_sym] = route if name
       route
@@ -116,6 +140,40 @@ module Prism
     def path_to(name, params = {})
       route = @named_routes.fetch(name.to_sym) { raise ArgumentError, "no named route #{name.inspect}" }
       route.path(params)
+    end
+
+    # Delegates every request under `prefix` to a separate Rack app (an
+    # engine, in Rails terms), like Rack::URLMap - checked only after no
+    # regular route matches, so a mounted app never shadows the host
+    # application's own routes. Longest prefix wins when mounts overlap.
+    def mount(prefix, app)
+      prefix = prefix.chomp('/')
+      @mounts << [prefix, app]
+      @mounts.sort_by! { |mounted_prefix, _| -mounted_prefix.length }
+    end
+
+    def find_mount(path)
+      @mounts.find { |prefix, _| path == prefix || path.start_with?("#{prefix}/") }
+    end
+
+    # Registers a WebSocket endpoint (an exact path, unlike `mount` - a
+    # single Upgrade: websocket handshake target like ActionCable's one
+    # "/cable" mount, not a prefix for a whole sub-application).
+    def add_websocket(path, handler, max_message_size: nil)
+      @websockets[path] = handler
+      @websocket_options[path] = { max_message_size: max_message_size }
+    end
+
+    def find_websocket(path)
+      @websockets[path]
+    end
+
+    # Per-path options registered alongside the handler (currently just
+    # `max_message_size:`) - kept separate from `find_websocket` rather than
+    # folded into its return value so that method keeps returning the bare
+    # handler class callers already match on.
+    def find_websocket_options(path)
+      @websocket_options[path] || {}
     end
   end
 end

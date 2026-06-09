@@ -9,11 +9,20 @@ module Prism
       "#{payload}#{Separator}#{sign(payload, secret)}"
     end
 
-    def decode(cookie, secret)
+    # `previous_secrets:` lets an app rotate its session secret (the
+    # Middleware::Session equivalent of Application#enable_attribute_
+    # encryption's `previous_secrets:`) without logging out every signed-in
+    # user the moment it deploys: a cookie signed under any retired secret
+    # still decodes here, while #encode (called once per request that
+    # touches the session) always signs under the current one, so every
+    # session is transparently re-signed onto the new secret the next time
+    # it changes at all.
+    def decode(cookie, secret, previous_secrets: [])
       return {} if cookie.nil? || cookie.empty?
       payload, signature = cookie.split(Separator, 2)
       return {} if payload.nil? || signature.nil?
-      return {} unless secure_compare(signature, sign(payload, secret))
+      candidates = [secret, *previous_secrets]
+      return {} unless candidates.any? { |candidate| secure_compare(signature, sign(payload, candidate)) }
       JSON.parse(decode64(payload))
     rescue JSON::ParserError, ArgumentError
       {}

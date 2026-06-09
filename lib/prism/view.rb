@@ -2,15 +2,43 @@ module Prism
   class View
     class TemplateNotFound < StandardError; end
 
-    def initialize(roots)
+    def initialize(roots, helpers: nil)
       @roots = Array(roots)
+      @helpers = helpers
       @namespace_stack = []
     end
 
     def render(name, locals: {}, layout: nil)
+      @content_store = {}
       content = render_template(name.to_s, locals)
       return content unless layout
       render_template("layouts/#{layout}", locals.merge('content' => content))
+    end
+
+    # content_for(:slot) { ... } inside the content template accumulates
+    # here; the layout template rendered right after reads it back with a
+    # plain content_for(:slot) call. Reset once per top-level #render so
+    # slots don't leak between unrelated requests that reuse this View.
+    def content_for(name)
+      (@content_store ||= {})[name.to_sym].to_s
+    end
+
+    def append_content_for(name, text)
+      store = (@content_store ||= {})
+      store[name.to_sym] = "#{store[name.to_sym]}#{text}"
+    end
+
+    def content_for?(name)
+      !(@content_store ||= {})[name.to_sym].to_s.empty?
+    end
+
+    # Turns a fragment-cache key argument into a single cache key string.
+    # Arrays let callers mix static scope names with model instances, e.g.
+    # `cache [:sidebar, current_user, post]`; anything responding to
+    # #cache_key (Orm::Model) contributes its own key, everything else is
+    # stringified as-is.
+    def expand_cache_key(key)
+      Array(key).map { |part| part.respond_to?(:cache_key) ? part.cache_key : part.to_s }.join('/')
     end
 
     def render_partial(name, locals: {})
@@ -35,9 +63,11 @@ module Prism
     private
 
     def render_template(name, locals)
-      source = File.read(resolve(name))
-      @namespace_stack.push(File.dirname(name))
-      Template.render(source, locals, self)
+      Instrumentation.instrument('render_template.prism', identifier: name) do
+        source = File.read(resolve(name))
+        @namespace_stack.push(File.dirname(name))
+        Template.render(source, locals, self, @helpers)
+      end
     ensure
       @namespace_stack.pop
     end

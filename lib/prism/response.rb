@@ -23,8 +23,29 @@ module Prism
       @headers[name] = value
     end
 
+    # A StreamingBody (or anything else that already knows how to hand
+    # itself to a Rack-style server one chunk at a time via #each) is kept
+    # as-is rather than wrapped in Array(value) - wrapping it would produce
+    # a one-element Array whose element is the streaming object itself,
+    # which Server#write_response's ordinary `body.join` path cannot join
+    # into a String, and which would defeat the entire point of streaming
+    # (nothing would be sent until the whole thing was collected anyway).
     def body=(value)
-      @body = Array(value)
+      @body = value.respond_to?(:each) ? value : Array(value)
+    end
+
+    # Sets the body to a StreamingBody wrapping `block`. The block itself
+    # does not run yet - only once whatever consumes the finished response
+    # (Server#write_response, or a test calling body.each directly) starts
+    # pulling chunks, exactly like an ordinary Rack body Array is not
+    # "used up" until something calls each/join on it either.
+    def stream(&block)
+      self.body = StreamingBody.new(&block)
+      self
+    end
+
+    def streaming?
+      @body.is_a?(StreamingBody)
     end
 
     def set_cookie(name, value, options = {})

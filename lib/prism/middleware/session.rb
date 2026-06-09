@@ -3,18 +3,21 @@ module Prism
     class Session
       CookieName = 'prism.session'.freeze
 
-      def initialize(app, secret:, cookie_name: CookieName, **options)
+      def initialize(app, secret:, previous_secrets: [], cookie_name: CookieName, **options)
         @app = app
         @secret = secret
+        @previous_secrets = previous_secrets
         @cookie_name = cookie_name
         @options = options
       end
 
       def call(env)
         request = Request.new(env)
-        loaded = Prism::Session.decode(request.cookies[@cookie_name], @secret)
+        loaded = Prism::Session.decode(request.cookies[@cookie_name], @secret, previous_secrets: @previous_secrets)
         session = Params.from(loaded)
         env['prism.session'] = session
+        env['prism.secret'] = @secret
+        env['prism.previous_secrets'] = @previous_secrets
         original = session.dup
 
         status, headers, body = @app.call(env)
