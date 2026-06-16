@@ -133,4 +133,32 @@ class ApplicationTest < Minitest::Test
     assert_equal 200, status
     assert_equal '', body.join
   end
+
+  def test_dispatch_emits_process_action_event_with_status
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('process_action.prism') { |event| events << event }
+    begin
+      call('GET', '/users/9')
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal 1, events.size
+    assert_equal 'GET', events.first.payload[:method]
+    assert_equal '/users/9', events.first.payload[:path]
+    assert_equal 200, events.first.payload[:status]
+  end
+
+  def test_dispatch_emits_event_for_not_found_too
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('process_action.prism') { |event| events << event }
+    begin
+      call('GET', '/missing')
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal 1, events.size
+    assert_equal 404, events.first.payload[:status]
+  end
 end
