@@ -156,3 +156,93 @@ class CliJobsTest < Minitest::Test
     queue.enqueue(job_class: 'CliJobsEchoJob', args: ['after-stale-pid'])
     @cli.jobs_work(['--once', "--pidfile=#{pidfile}"])
 
+    assert_equal ['after-stale-pid'], CliJobsEchoJob.log
+    refute File.exist?(pidfile)
+  end
+
+  # Real end-to-end daemon smoke test: runs `bin/prism jobs work` as its own
+  # OS process (no --once, no --max-cycles), lets it poll and drain a job,
+  # then sends it SIGINT the same way an operator or init system would and
+  # confirms it shuts down cleanly rather than needing to be killed.
+  def test_daemon_process_drains_jobs_and_shuts_down_cleanly_on_sigint
+    job_file = File.join(@dir, 'daemon_job.rb')
+    marker_path = File.join(@dir, 'daemon_marker.txt')
+    File.write(job_file, <<~RUBY)
+      class CliJobsDaemonJob
+        def perform(marker_path)
+          File.write(marker_path, 'ran')
+        end
+      end
+    RUBY
+    queue.enqueue(job_class: 'CliJobsDaemonJob', args: [marker_path])
+
+    bin = File.expand_path('../bin/prism', __dir__)
+    pid = Process.spawn(
+      bin, 'jobs', 'work', '--interval=0.05', '--require=daemon_job.rb',
+      chdir: @dir, out: File::NULL, err: File::NULL
+    )
+
+    deadline = Time.now + 5
+    sleep 0.05 until File.exist?(marker_path) || Time.now > deadline
+    assert File.exist?(marker_path), 'daemon did not process the job within 5s'
+    assert_equal 'ran', File.read(marker_path)
+
+    Process.kill('INT', pid)
+    _, status = Process.wait2(pid)
+    assert status.success?, "daemon did not exit cleanly after SIGINT (status: #{status})"
+  end
+
+  # Real horizontal-scaling scenario: two independent `bin/prism jobs work`
+  # daemons (separate OS processes, no pidfile since neither is meant to be
+  # "the only one") polling the SAME queue file. Jobs::Queue#claim_next! is
+  # already proven race-free at the storage layer (test_jobs_queue.rb spawns
+  # 4 bare claimer processes), but that does not by itself prove the CLI
+  # daemon loop (poll -> work_off -> sleep -> repeat, plus its own error
+  # handling/verbose logging) is safe to run in more than one copy - this
+  # drives the actual `bin/prism jobs work` entrypoint twice and checks both
+  # that every job runs exactly once AND that work genuinely got split
+  # between the two processes rather than one daemon draining the whole
+  # queue before the other gets a chance to poll.
+  def test_two_real_daemon_processes_share_the_same_queue_without_dropping_or_duplicating_jobs
+    job_count = 60
+    results_dir = File.join(@dir, 'daemon_results')
+    FileUtils.mkdir_p(results_dir)
+
+    job_file = File.join(@dir, 'multi_daemon_job.rb')
+    File.write(job_file, <<~RUBY)
+      class CliJobsMultiDaemonJob
+        def perform(id, results_dir)
+          sleep 0.02
+          File.write(File.join(results_dir, "job-\#{id}.done"), Process.pid.to_s)
+        end
+      end
+    RUBY
+
+    job_count.times { |i| queue.enqueue(job_class: 'CliJobsMultiDaemonJob', args: [i, results_dir]) }
+
+    bin = File.expand_path('../bin/prism', __dir__)
+    pids = 2.times.map do
+      Process.spawn(
+        bin, 'jobs', 'work', '--interval=0.01', '--require=multi_daemon_job.rb',
+        chdir: @dir, out: File::NULL, err: File::NULL
+      )
+    end
+
+    deadline = Time.now + 10
+    sleep 0.05 while queue.size.positive? && Time.now < deadline
+
+    pids.each { |pid| Process.kill('INT', pid) }
+    pids.each { |pid| Process.wait2(pid) }
+
+    assert_equal 0, queue.size, 'both daemons together should have drained the whole queue within the deadline'
+
+    result_files = Dir.glob(File.join(results_dir, 'job-*.done'))
+    assert_equal job_count, result_files.size, 'every job should have run exactly once (no drops, no duplicates)'
+    expected_names = (0...job_count).map { |i| "job-#{i}.done" }.sort
+    assert_equal expected_names, result_files.map { |f| File.basename(f) }.sort
+
+    processing_pids = result_files.map { |f| File.read(f).strip }.uniq
+    assert_equal pids.map(&:to_s).sort, processing_pids.sort,
+                 'both daemon processes should have actually processed jobs, not just one of them'
+  end
+end
