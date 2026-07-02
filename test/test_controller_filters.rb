@@ -40,6 +40,48 @@ class FilterApp < Prism::Application
   get '/public', to: 'filter#public_action'
 end
 
+class BaseWithFiltersController < Prism::Controller
+  before_action :stamp_base, only: %i[index]
+  after_action :stamp_base_after, only: %i[index]
+
+  private
+
+  def stamp_base
+    @trail = (@trail || []) << 'base-before'
+  end
+
+  def stamp_base_after
+    self.class.trail_after << 'base-before-runs-first?'
+  end
+end
+
+class InheritedFiltersController < BaseWithFiltersController
+  before_action :stamp_sub, only: %i[index]
+
+  def self.trail_after
+    @trail_after ||= []
+  end
+
+  def index
+    json(trail: @trail)
+  end
+
+  def other
+    json(trail: @trail)
+  end
+
+  private
+
+  def stamp_sub
+    @trail << 'sub-before'
+  end
+end
+
+class InheritedFiltersApp < Prism::Application
+  get '/inherited', to: 'inherited_filters#index'
+  get '/inherited-other', to: 'inherited_filters#other'
+end
+
 class ControllerFiltersTest < Minitest::Test
   include TestSupport
 
@@ -49,6 +91,10 @@ class ControllerFiltersTest < Minitest::Test
 
   def call(method, path, **opts)
     FilterApp.call(env_for(method, path, **opts))
+  end
+
+  def call_inherited(method, path, **opts)
+    InheritedFiltersApp.call(env_for(method, path, **opts))
   end
 
   def test_inline_before_action_block_runs_and_scoped_to_only
@@ -82,5 +128,20 @@ class ControllerFiltersTest < Minitest::Test
   def test_after_action_except_is_honored
     call('GET', '/public')
     refute_includes FilterController.after_log, 'public_action'
+  end
+
+  def test_before_action_declared_on_a_superclass_runs_for_a_subclass_action
+    _, _, body = call_inherited('GET', '/inherited')
+    assert_equal %w[base-before sub-before], JSON.parse(body.join)['trail']
+  end
+
+  def test_after_action_declared_on_a_superclass_runs_for_a_subclass_action
+    call_inherited('GET', '/inherited')
+    assert_includes InheritedFiltersController.trail_after, 'base-before-runs-first?'
+  end
+
+  def test_inherited_before_action_only_option_still_scopes_to_the_declared_action
+    _, _, body = call_inherited('GET', '/inherited-other')
+    assert_nil JSON.parse(body.join)['trail']
   end
 end
