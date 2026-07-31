@@ -320,3 +320,162 @@ class OrmIndexRangeStoreTest < Minitest::Test
     assert_equal ['b@x.com'], matches.map { |row| row['email'] }
   end
 
+  def test_range_lookup_tracks_updates
+    @store.add_index(:users, :age)
+    id = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.update(:users, id, age: 99)
+
+    assert_equal [id], @store.lookup_by_index_range(:users, :age, gte: 90).map { |r| r['id'] }
+    assert_equal [], @store.lookup_by_index_range(:users, :age, gte: 5, lte: 10)
+  end
+
+  def test_range_lookup_forgets_deleted_rows
+    @store.add_index(:users, :age)
+    id = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.delete(:users, id)
+    assert_equal [], @store.lookup_by_index_range(:users, :age, gte: 0)
+  end
+
+  def test_reused_value_after_update_and_reinsert_still_resolves_correctly
+    @store.add_index(:users, :age)
+    a = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.insert(:users, email: 'b@x.com', age: 10)
+    @store.update(:users, a, age: 50)
+
+    assert_equal ['b@x.com'], @store.lookup_by_index_range(:users, :age, gte: 0, lte: 20).map { |r| r['email'] }
+    assert_equal ['a@x.com'], @store.lookup_by_index_range(:users, :age, gte: 40).map { |r| r['email'] }
+  end
+end
+
+# Covers Store#lookup_by_index_in - the IN-list lookup backing
+# `where(column: [v1, v2, ...])`, most importantly `where(id: [...])`,
+# which every belongs_to/has_one/has_many/has_many-through eager-load
+# batches its preload query through (see Relation#preload_belongs_to and
+# friends).
+class OrmIndexInListStoreTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-in-store')
+    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:users, %w[id email age])
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+  end
+
+  def test_id_lookup_needs_no_add_index_call_at_all
+    a = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.insert(:users, email: 'b@x.com', age: 20)
+    c = @store.insert(:users, email: 'c@x.com', age: 30)
+
+    matches = @store.lookup_by_index_in(:users, :id, [a, c])
+    assert_equal ['a@x.com', 'c@x.com'], matches.map { |row| row['email'] }.sort
+  end
+
+  def test_id_lookup_ignores_ids_that_do_not_exist
+    a = @store.insert(:users, email: 'a@x.com', age: 10)
+    matches = @store.lookup_by_index_in(:users, :id, [a, a + 1000])
+    assert_equal [a], matches.map { |row| row['id'] }
+  end
+
+  def test_id_lookup_deduplicates_repeated_values
+    a = @store.insert(:users, email: 'a@x.com', age: 10)
+    matches = @store.lookup_by_index_in(:users, :id, [a, a, a])
+    assert_equal 1, matches.size
+  end
+
+  def test_lookup_by_index_in_returns_nil_without_a_covering_index_on_a_non_id_column
+    @store.insert(:users, email: 'a@x.com', age: 10)
+    assert_nil @store.lookup_by_index_in(:users, :email, ['a@x.com'])
+  end
+
+  def test_lookup_by_index_in_uses_a_single_column_index_when_present
+    @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.insert(:users, email: 'b@x.com', age: 20)
+    @store.insert(:users, email: 'c@x.com', age: 30)
+    @store.add_index(:users, :email)
+
+    matches = @store.lookup_by_index_in(:users, :email, ['a@x.com', 'c@x.com'])
+    assert_equal ['a@x.com', 'c@x.com'], matches.map { |row| row['email'] }.sort
+  end
+
+  def test_composite_index_cannot_answer_an_in_list_on_one_of_its_columns
+    @store.add_index(:users, [:email, :age])
+    @store.insert(:users, email: 'a@x.com', age: 10)
+    assert_nil @store.lookup_by_index_in(:users, :email, ['a@x.com'])
+  end
+
+  def test_in_list_lookup_tracks_updates
+    @store.add_index(:users, :email)
+    id = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.update(:users, id, email: 'new@x.com')
+
+    assert_equal [], @store.lookup_by_index_in(:users, :email, ['a@x.com'])
+    assert_equal [id], @store.lookup_by_index_in(:users, :email, ['new@x.com']).map { |r| r['id'] }
+  end
+
+  def test_in_list_lookup_forgets_deleted_rows
+    @store.add_index(:users, :email)
+    id = @store.insert(:users, email: 'a@x.com', age: 10)
+    @store.delete(:users, id)
+    assert_equal [], @store.lookup_by_index_in(:users, :email, ['a@x.com'])
+    assert_equal [], @store.lookup_by_index_in(:users, :id, [id])
+  end
+
+  def test_an_empty_values_list_matches_nothing_without_touching_the_table
+    @store.insert(:users, email: 'a@x.com', age: 10)
+    assert_equal [], @store.lookup_by_index_in(:users, :id, [])
+  end
+end
+
+# Counts full-table scans (Store#all) separately from index lookups
+# (Store#lookup_by_index that actually found a covering index), the same
+# shape as CountingStore/CountingThroughStore used by the eager-loading
+# tests, so Relation's index usage can be proven rather than assumed.
+class CountingIndexStore < Prism::Orm::Store
+  attr_reader :scan_count
+
+  attr_reader :range_hits
+
+  attr_reader :in_hits
+
+  attr_reader :eq_range_hits
+
+  def initialize(*args)
+    super
+    @scan_count = 0
+    @index_hits = 0
+    @range_hits = 0
+    @in_hits = 0
+    @eq_range_hits = 0
+  end
+
+  def all(table)
+    @scan_count += 1
+    super
+  end
+
+  def lookup_by_index(table, equalities)
+    result = super
+    @index_hits += 1 unless result.nil?
+    result
+  end
+
+  def lookup_by_index_range(table, column, operators)
+    result = super
+    @range_hits += 1 unless result.nil?
+    result
+  end
+
+  def lookup_by_index_in(table, column, values)
+    result = super
+    @in_hits += 1 unless result.nil?
+    result
+  end
+
+  def lookup_by_index_equality_range(table, equalities, column, operators)
+    result = super
+    @eq_range_hits += 1 unless result.nil?
+    result
+  end
+
