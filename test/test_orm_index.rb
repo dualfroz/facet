@@ -479,3 +479,506 @@ class CountingIndexStore < Prism::Orm::Store
     result
   end
 
+  def reset_counts!
+    @scan_count = 0
+    @index_hits = 0
+    @range_hits = 0
+    @in_hits = 0
+    @eq_range_hits = 0
+  end
+
+  def index_hits
+    @index_hits
+  end
+end
+
+class OrmIndexRelationTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-relation')
+    @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:posts, %w[id title status])
+    @store.add_index(:posts, :status)
+
+    post_class = Class.new(Prism::Orm::Model) { table_name :posts }
+    post_class.store = @store
+    Object.const_set(:IndexedPost, post_class)
+
+    IndexedPost.create!(title: 'a', status: 'draft')
+    IndexedPost.create!(title: 'b', status: 'published')
+    IndexedPost.create!(title: 'c', status: 'draft')
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+    Object.send(:remove_const, :IndexedPost) if Object.const_defined?(:IndexedPost)
+  end
+
+  def test_where_on_an_indexed_column_never_scans_the_full_table
+    @store.reset_counts!
+    results = IndexedPost.where(status: 'draft').to_a
+    assert_equal ['a', 'c'], results.map { |post| post['title'] }.sort
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.index_hits
+  end
+
+  def test_where_on_an_unindexed_column_falls_back_to_a_full_scan
+    @store.reset_counts!
+    results = IndexedPost.where(title: 'a').to_a
+    assert_equal ['a'], results.map { |post| post['title'] }
+    assert_equal 1, @store.scan_count
+    assert_equal 0, @store.index_hits
+  end
+
+  def test_chained_where_mixing_indexed_and_unindexed_columns_is_still_correct
+    @store.reset_counts!
+    results = IndexedPost.where(status: 'draft').where(title: 'c').to_a
+    assert_equal ['c'], results.map { |post| post['title'] }
+    assert_equal 0, @store.scan_count, 'the indexed equality should still narrow the candidate set'
+  end
+
+  def test_or_condition_cannot_use_the_index_but_is_still_correct
+    @store.reset_counts!
+    results = IndexedPost.where(status: 'draft').or(IndexedPost.where(title: 'b')).to_a
+    assert_equal ['a', 'b', 'c'], results.map { |post| post['title'] }.sort
+    assert_equal 1, @store.scan_count, 'an OR across columns cannot guarantee a single index key, so it must scan'
+  end
+
+  def test_find_by_uses_the_index
+    @store.reset_counts!
+    post = IndexedPost.find_by(status: 'published')
+    assert_equal 'b', post['title']
+    assert_equal 0, @store.scan_count
+  end
+
+  def test_or_condition_unions_index_hits_once_both_branches_are_indexed
+    @store.add_index(:posts, :title)
+    @store.reset_counts!
+
+    results = IndexedPost.where(status: 'draft').or(IndexedPost.where(title: 'b')).to_a
+    assert_equal ['a', 'b', 'c'], results.map { |post| post['title'] }.sort
+    assert_equal 0, @store.scan_count, 'both branches are indexed, so the union must never fall back to a scan'
+    assert_equal 2, @store.index_hits, 'one lookup per branch of the Or'
+  end
+
+  def test_or_condition_dedupes_a_row_matched_by_both_indexed_branches
+    @store.add_index(:posts, :title)
+    @store.reset_counts!
+
+    # post "a" is status draft AND title "a" - both branches of the Or match
+    # the same row, so the union must not return it twice.
+    results = IndexedPost.where(status: 'draft').or(IndexedPost.where(title: 'a')).to_a
+    assert_equal ['a', 'c'], results.map { |post| post['title'] }.sort
+    assert_equal 2, results.size
+    assert_equal 0, @store.scan_count
+  end
+
+  # `a.or(b).or(c)` builds OrNode(OrNode(a, b), c) - a left-nested tree, not
+  # a flat three-way union. OrNode#indexed_candidates only recurses into
+  # @left/@right, so this exercises that the recursion actually reaches the
+  # innermost branch rather than treating the outer node's @left (itself an
+  # OrNode) as an opaque leaf. Left untested since the index-union Or was
+  # first added, per prism-postep.md "kierunki dalsze".
+  def test_three_way_or_uses_the_index_on_every_branch
+    @store.add_index(:posts, :title)
+    IndexedPost.create!(title: 'd', status: 'published')
+    @store.reset_counts!
+
+    results = IndexedPost.where(status: 'draft')
+                          .or(IndexedPost.where(title: 'b'))
+                          .or(IndexedPost.where(title: 'd'))
+                          .to_a
+    assert_equal ['a', 'b', 'c', 'd'], results.map { |post| post['title'] }.sort
+    assert_equal 0, @store.scan_count, 'every branch of the three-way Or is indexed, so it must never fall back to a scan'
+    assert_equal 3, @store.index_hits, 'one lookup per branch, including the nested inner Or'
+  end
+
+  def test_three_way_or_falls_back_to_a_scan_when_one_branch_is_unindexed
+    @store.reset_counts!
+
+    # title carries no index in this test (unlike the one above), so the
+    # whole union must scan rather than silently dropping that branch's
+    # matches while still answering the other two from their indexes.
+    results = IndexedPost.where(status: 'draft')
+                          .or(IndexedPost.where(title: 'b'))
+                          .or(IndexedPost.where(status: 'archived'))
+                          .to_a
+    assert_equal ['a', 'b', 'c'], results.map { |post| post['title'] }.sort
+    assert_equal 1, @store.scan_count
+  end
+end
+
+class OrmIndexRangeRelationTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-range-relation')
+    @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:products, %w[id name price])
+    @store.add_index(:products, :price)
+
+    product_class = Class.new(Prism::Orm::Model) { table_name :products }
+    product_class.store = @store
+    Object.const_set(:RangeIndexedProduct, product_class)
+
+    RangeIndexedProduct.create!(name: 'cheap', price: 5)
+    RangeIndexedProduct.create!(name: 'mid', price: 15)
+    RangeIndexedProduct.create!(name: 'pricey', price: 25)
+    RangeIndexedProduct.create!(name: 'luxury', price: 35)
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+    Object.send(:remove_const, :RangeIndexedProduct) if Object.const_defined?(:RangeIndexedProduct)
+  end
+
+  def test_gte_on_an_indexed_column_never_scans_the_full_table
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: { gte: 15 }).order(:price).to_a
+    assert_equal %w[mid pricey luxury], results.map { |p| p['name'] }
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.range_hits
+  end
+
+  def test_combined_gte_and_lte_in_one_hash_uses_the_range_index
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: { gte: 10, lte: 30 }).order(:price).to_a
+    assert_equal %w[mid pricey], results.map { |p| p['name'] }
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.range_hits
+  end
+
+  def test_a_ruby_range_value_uses_the_range_index
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: 10..30).order(:price).to_a
+    assert_equal %w[mid pricey], results.map { |p| p['name'] }
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.range_hits
+  end
+
+  def test_an_exclusive_end_ruby_range_excludes_the_boundary
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: 15...25).to_a
+    assert_equal ['mid'], results.map { |p| p['name'] }
+    assert_equal 0, @store.scan_count
+  end
+
+  def test_two_chained_wheres_narrow_the_same_column_via_and
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: { gte: 10 }).where(price: { lte: 30 }).order(:price).to_a
+    assert_equal %w[mid pricey], results.map { |p| p['name'] }
+    assert_equal 0, @store.scan_count, 'the AND of two range clauses on the same column must still avoid a scan'
+  end
+
+  def test_a_hash_mixing_a_range_operator_with_a_non_range_operator_falls_back_to_a_scan
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: { gte: 10, ne: 25 }).order(:price).to_a
+    assert_equal %w[mid luxury], results.map { |p| p['name'] }
+    assert_equal 1, @store.scan_count, ':ne cannot be expressed as a contiguous bound, so this must be a full scan'
+    assert_equal 0, @store.range_hits
+  end
+
+  def test_or_across_columns_still_falls_back_to_a_scan_when_only_one_side_is_indexed
+    @store.reset_counts!
+    results = RangeIndexedProduct.where(price: { gte: 30 }).or(RangeIndexedProduct.where(name: 'cheap')).to_a
+    assert_equal %w[cheap luxury], results.map { |p| p['name'] }.sort
+    assert_equal 1, @store.scan_count, 'name has no index, so OrNode cannot union candidates from both sides'
+    # The price side IS individually range-indexed, and OrNode#indexed_candidates
+    # tries it before discovering the name side has no covering index at all -
+    # that one probe is cheap (an O(log n) index lookup, not a scan) and its
+    # result is simply discarded once the other side comes back nil.
+    assert_equal 1, @store.range_hits
+  end
+end
+
+class OrmIndexInListRelationTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-in-relation')
+    @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:widgets, %w[id sku status])
+    @store.add_index(:widgets, :sku)
+
+    widget_class = Class.new(Prism::Orm::Model) { table_name :widgets }
+    widget_class.store = @store
+    Object.const_set(:InListWidget, widget_class)
+
+    @a = InListWidget.create!(sku: 'AAA', status: 'active')
+    @b = InListWidget.create!(sku: 'BBB', status: 'active')
+    @c = InListWidget.create!(sku: 'CCC', status: 'retired')
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+    Object.send(:remove_const, :InListWidget) if Object.const_defined?(:InListWidget)
+  end
+
+  def test_where_id_in_never_scans_even_with_no_add_index_call_for_id
+    @store.reset_counts!
+    results = InListWidget.where(id: [@a.id, @c.id]).to_a
+    assert_equal %w[AAA CCC], results.map { |w| w['sku'] }.sort
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.in_hits
+  end
+
+  def test_where_on_an_in_indexed_column_never_scans
+    @store.reset_counts!
+    results = InListWidget.where(sku: %w[AAA CCC]).to_a
+    assert_equal %w[AAA CCC], results.map { |w| w['sku'] }.sort
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.in_hits
+  end
+
+  def test_where_on_an_unindexed_column_in_list_falls_back_to_a_scan
+    @store.reset_counts!
+    results = InListWidget.where(status: ['retired']).to_a
+    assert_equal ['CCC'], results.map { |w| w['sku'] }
+    assert_equal 1, @store.scan_count
+    assert_equal 0, @store.in_hits
+  end
+
+  def test_unknown_ids_are_silently_dropped_not_nil_rows
+    @store.reset_counts!
+    results = InListWidget.where(id: [@a.id, @a.id + 999]).to_a
+    assert_equal [@a.id], results.map(&:id)
+  end
+
+  def test_two_chained_id_in_wheres_intersect_instead_of_scanning
+    @store.reset_counts!
+    results = InListWidget.where(id: [@a.id, @b.id, @c.id]).where(id: [@b.id, @c.id]).to_a
+    assert_equal [@b.id, @c.id].sort, results.map(&:id).sort
+    assert_equal 0, @store.scan_count
+  end
+
+  def test_an_equality_condition_alongside_an_id_in_list_still_uses_an_index_and_stays_correct
+    @store.reset_counts!
+    results = InListWidget.where(id: [@a.id, @b.id, @c.id]).where(sku: 'BBB').to_a
+    assert_equal ['BBB'], results.map { |w| w['sku'] }
+    assert_equal 0, @store.scan_count
+  end
+end
+
+class OrmIndexEqualityRangeStoreTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-eq-range-store')
+    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:posts, %w[id featured position])
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+  end
+
+  def test_returns_nil_without_a_covering_composite_index
+    @store.insert(:posts, featured: true, position: 1)
+    assert_nil @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position, gte: 0)
+  end
+
+  def test_a_single_column_index_on_the_range_column_alone_does_not_cover_it
+    @store.add_index(:posts, :position)
+    @store.insert(:posts, featured: true, position: 1)
+    assert_nil @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position, gte: 0)
+  end
+
+  def test_finds_rows_within_the_prefix_and_bounds
+    @store.add_index(:posts, %i[featured position])
+    @store.insert(:posts, featured: true, position: 1)
+    @store.insert(:posts, featured: true, position: 2)
+    @store.insert(:posts, featured: true, position: 3)
+    @store.insert(:posts, featured: false, position: 1)
+
+    matches = @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position, lt: 3)
+    assert_equal [1, 2], matches.map { |row| row['position'] }.sort
+  end
+
+  def test_equality_key_order_from_the_caller_does_not_matter
+    wide = Prism::Orm::Store.new(File.join(@dir, 'order.pstore'))
+    wide.create_table(:tasks, %w[id project priority position])
+    wide.add_index(:tasks, %i[project priority position])
+    wide.insert(:tasks, project: 'a', priority: 'high', position: 1)
+    wide.insert(:tasks, project: 'a', priority: 'high', position: 2)
+
+    declared_order = wide.lookup_by_index_equality_range(:tasks, { project: 'a', priority: 'high' }, :position, gte: 0)
+    reversed_order = wide.lookup_by_index_equality_range(:tasks, { priority: 'high', project: 'a' }, :position, gte: 0)
+    assert_equal [1, 2], declared_order.map { |row| row['position'] }.sort
+    assert_equal declared_order.map { |row| row['id'] }.sort, reversed_order.map { |row| row['id'] }.sort
+  end
+
+  def test_backfills_from_existing_rows
+    @store.insert(:posts, featured: true, position: 1)
+    @store.insert(:posts, featured: true, position: 2)
+    @store.add_index(:posts, %i[featured position])
+
+    matches = @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position, gte: 2)
+    assert_equal [2], matches.map { |row| row['position'] }
+  end
+
+  def test_tracks_inserts_updates_and_deletes
+    @store.add_index(:posts, %i[featured position])
+    a = @store.insert(:posts, featured: true, position: 1)
+    @store.insert(:posts, featured: true, position: 2)
+
+    assert_equal [1, 2], @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position,
+                                                                gte: 0).map { |r| r['position'] }.sort
+
+    @store.update(:posts, a, position: 9)
+    assert_equal [2, 9], @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position,
+                                                                gte: 0).map { |r| r['position'] }.sort
+
+    @store.delete(:posts, a)
+    assert_equal [2], @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position,
+                                                             gte: 0).map { |r| r['position'] }
+  end
+
+  def test_switching_the_prefix_value_moves_a_row_to_the_other_partition
+    @store.add_index(:posts, %i[featured position])
+    id = @store.insert(:posts, featured: true, position: 1)
+
+    @store.update(:posts, id, featured: false)
+    assert_equal [], @store.lookup_by_index_equality_range(:posts, { 'featured' => true }, :position, gte: 0)
+    assert_equal [1], @store.lookup_by_index_equality_range(:posts, { 'featured' => false }, :position,
+                                                             gte: 0).map { |r| r['position'] }
+  end
+
+  def test_an_unknown_prefix_value_matches_nothing_without_a_scan
+    @store.add_index(:posts, %i[featured position])
+    @store.insert(:posts, featured: true, position: 1)
+
+    assert_equal [], @store.lookup_by_index_equality_range(:posts, { 'featured' => 'nonexistent' }, :position, gte: 0)
+  end
+
+  def test_a_three_column_composite_index_still_works_with_a_two_column_prefix
+    @store = Prism::Orm::Store.new(File.join(@dir, 'wide.pstore'))
+    @store.create_table(:tasks, %w[id project priority position])
+    @store.add_index(:tasks, %i[project priority position])
+    @store.insert(:tasks, project: 'a', priority: 'high', position: 1)
+    @store.insert(:tasks, project: 'a', priority: 'high', position: 2)
+    @store.insert(:tasks, project: 'a', priority: 'low', position: 1)
+
+    matches = @store.lookup_by_index_equality_range(:tasks, { project: 'a', priority: 'high' }, :position, gte: 0)
+    assert_equal [1, 2], matches.map { |row| row['position'] }.sort
+  end
+
+  def test_lookup_by_index_range_still_refuses_a_composite_index_unchanged_behavior
+    @store.add_index(:posts, %i[featured position])
+    @store.insert(:posts, featured: true, position: 1)
+    assert_nil @store.lookup_by_index_range(:posts, :position, gte: 0)
+  end
+
+  # A paranoid model's Model.all already carries `where(deleted_at: nil)`
+  # before any caller-added `.where(featured: ...)` - real regression this
+  # session's blog_demo.rb run caught: the index prefix is only `featured`,
+  # so `equalities` legitimately arrives with an EXTRA column
+  # (`deleted_at`) the index knows nothing about. That must still resolve
+  # through the index (using only the subset it actually covers), not fall
+  # back to a scan just because the caller happened to also constrain an
+  # unrelated column.
+  def test_an_equality_column_outside_the_index_prefix_does_not_block_the_lookup
+    @store.add_index(:posts, %i[featured position])
+    @store.insert(:posts, featured: true, position: 1, deleted_at: nil)
+    @store.insert(:posts, featured: true, position: 5, deleted_at: nil)
+
+    matches = @store.lookup_by_index_equality_range(:posts, { 'deleted_at' => nil, 'featured' => true },
+                                                      :position, lt: 3)
+    assert_equal [1], matches.map { |row| row['position'] }
+  end
+
+  def test_the_most_specific_covering_composite_index_wins_when_several_could_answer
+    wide = Prism::Orm::Store.new(File.join(@dir, 'multi.pstore'))
+    wide.create_table(:tasks, %w[id project priority position])
+    wide.add_index(:tasks, %i[project position])
+    wide.add_index(:tasks, %i[project priority position])
+    wide.insert(:tasks, project: 'a', priority: 'high', position: 1)
+    wide.insert(:tasks, project: 'a', priority: 'low', position: 2)
+
+    matches = wide.lookup_by_index_equality_range(:tasks, { project: 'a', priority: 'high' }, :position, gte: 0)
+    assert_equal [1], matches.map { |row| row['position'] },
+                 'the 3-column index covering priority too should be preferred over the 2-column one'
+  end
+end
+
+class OrmIndexEqualityRangeRelationTest < Minitest::Test
+  def setup
+    @dir = Dir.mktmpdir('prism-index-eq-range-relation')
+    @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
+    @store.create_table(:posts, %w[id featured position])
+    @store.add_index(:posts, %i[featured position])
+
+    post_class = Class.new(Prism::Orm::Model) { table_name :posts }
+    post_class.store = @store
+    Object.const_set(:EqRangeIndexedPost, post_class)
+
+    EqRangeIndexedPost.create!(featured: true, position: 1)
+    EqRangeIndexedPost.create!(featured: true, position: 2)
+    EqRangeIndexedPost.create!(featured: true, position: 3)
+    EqRangeIndexedPost.create!(featured: false, position: 1)
+    EqRangeIndexedPost.create!(featured: false, position: 2)
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+    Object.send(:remove_const, :EqRangeIndexedPost) if Object.const_defined?(:EqRangeIndexedPost)
+  end
+
+  def test_two_chained_wheres_scope_equality_then_range_never_scan
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: true).where(position: { lt: 3 }).order(:position).to_a
+    assert_equal [1, 2], results.map { |p| p['position'] }
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.eq_range_hits
+  end
+
+  def test_single_where_with_both_conditions_in_one_hash_never_scans
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: true, position: { gte: 2 }).to_a
+    assert_equal [2, 3], results.map { |p| p['position'] }.sort
+    assert_equal 0, @store.scan_count
+    assert_equal 1, @store.eq_range_hits
+  end
+
+  def test_a_ruby_range_value_alongside_an_equality_uses_the_composite_index
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: false).where(position: 1..1).to_a
+    assert_equal [1], results.map { |p| p['position'] }
+    assert_equal 0, @store.scan_count
+  end
+
+  def test_the_other_scope_partition_is_unaffected_by_the_first
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: false).where(position: { gte: 0 }).to_a
+    assert_equal [1, 2], results.map { |p| p['position'] }.sort
+    assert_equal 0, @store.scan_count
+  end
+
+  def test_range_without_any_equality_falls_back_to_a_scan_not_the_composite_index
+    # This fixture only has the composite [featured, position] index, no
+    # standalone index on position - a bare range with no equality column
+    # to pair with can use neither the plain range path (single-column
+    # only) nor the composite one (needs an equality prefix), so a scan is
+    # the correct, honest answer here, not a false "it found an index".
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(position: { gte: 3 }).to_a
+    assert_equal [3], results.map { |p| p['position'] }
+    assert_equal 1, @store.scan_count
+    assert_equal 0, @store.eq_range_hits, 'no equality column means no composite prefix to look up'
+  end
+
+  def test_equality_without_any_range_falls_back_to_a_scan_not_the_composite_index
+    # Same reasoning as above, mirrored: this fixture has no standalone
+    # index on featured either, only the composite - a bare equality with
+    # no range column to pair with can't use a composite index that
+    # requires ALL its columns pinned (see Store#lookup_by_index), so this
+    # is a scan too, not a spurious composite hit.
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: true).to_a
+    assert_equal 3, results.size
+    assert_equal 1, @store.scan_count
+    assert_equal 0, @store.eq_range_hits
+  end
+
+  def test_reflects_a_reorder_through_the_underlying_model
+    post = EqRangeIndexedPost.where(featured: true).where(position: 1).first
+    post.class.store.increment_counter(post.class.table_name, post.id, 'position', 10)
+
+    @store.reset_counts!
+    results = EqRangeIndexedPost.where(featured: true).where(position: { lt: 3 }).to_a
+    assert_equal [2], results.map { |p| p['position'] }
+    assert_equal 0, @store.scan_count
+  end
+end
