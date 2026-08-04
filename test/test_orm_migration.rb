@@ -83,6 +83,37 @@ class OrmMigrationTest < Minitest::Test
     assert_empty @store.applied_migrations
   end
 
+  def test_status_reports_applied_and_pending_migrations_in_order
+    write_migration('20260101000004', 'CreateCogsForMigrationTest', <<~RUBY)
+      def up
+        create_table(:cogs_for_migration_test) { |t| t.string :name }
+      end
+
+      def down
+        drop_table :cogs_for_migration_test
+      end
+    RUBY
+    write_migration('20260101000005', 'CreateBoltsForMigrationTest', <<~RUBY)
+      def up
+        create_table(:bolts_for_migration_test) { |t| t.string :name }
+      end
+
+      def down
+        drop_table :bolts_for_migration_test
+      end
+    RUBY
+
+    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator.migrate!
+    migrator.rollback!
+
+    status = migrator.status
+    versions_and_state = status.map { |entry, applied| [entry.version, applied] }
+    assert_includes versions_and_state, ['20260101000004', true]
+    assert_includes versions_and_state, ['20260101000005', false]
+    assert_equal status.map { |entry, _| entry.version }, status.map { |entry, _| entry.version }.sort
+  end
+
   def test_rollback_multiple_steps_reverts_in_reverse_order
     write_migration('20260101000020', 'FirstMultiRollbackTest', <<~RUBY)
       def up
