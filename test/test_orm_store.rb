@@ -104,6 +104,52 @@ class OrmStoreTest < Minitest::Test
     assert_empty @store.applied_migrations
   end
 
+  def test_insert_emits_sql_prism_event
+    @store.create_table(:users, %w[id name])
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('sql.prism') { |event| events << event }
+    begin
+      @store.insert(:users, name: 'foksiu')
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal 1, events.size
+    assert_equal 'INSERT', events.first.payload[:operation]
+    assert_equal 'users', events.first.payload[:table]
+  end
+
+  def test_find_and_all_and_count_emit_select_events
+    @store.create_table(:users, %w[id name])
+    id = @store.insert(:users, name: 'foksiu')
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('sql.prism') { |event| events << event }
+    begin
+      @store.find(:users, id)
+      @store.all(:users)
+      @store.count(:users)
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal %w[SELECT SELECT], events.first(2).map { |e| e.payload[:operation] }
+    assert_equal 'SELECT COUNT', events.last.payload[:operation]
+  end
+
+  def test_update_missing_record_still_emits_event_with_exception
+    @store.create_table(:users, %w[id name])
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('sql.prism') { |event| events << event }
+    begin
+      assert_raises(Prism::Orm::Store::RecordNotFound) { @store.update(:users, 999, name: 'nope') }
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal 1, events.size
+    assert_equal 'Prism::Orm::Store::RecordNotFound', events.first.payload[:exception].first
+  end
+
   def test_data_survives_reopening_the_store
     @store.create_table(:users, %w[id name])
     @store.insert(:users, name: 'persisted-foksiu')
