@@ -30,4 +30,22 @@ class SessionTest < Minitest::Test
     assert_equal({}, Prism::Session.decode(nil, 's'))
     assert_equal({}, Prism::Session.decode('', 's'))
   end
+
+  def test_previous_secrets_still_decode_a_cookie_signed_under_a_retired_secret
+    cookie = Prism::Session.encode({ 'user' => 'foksiu' }, 'old-secret')
+    decoded = Prism::Session.decode(cookie, 'new-secret', previous_secrets: ['old-secret'])
+    assert_equal 'foksiu', decoded['user']
+  end
+
+  def test_previous_secrets_do_not_accept_a_cookie_signed_under_neither_secret
+    cookie = Prism::Session.encode({ 'user' => 'foksiu' }, 'unrelated-secret')
+    decoded = Prism::Session.decode(cookie, 'new-secret', previous_secrets: ['old-secret'])
+    assert_equal({}, decoded)
+  end
+
+  def test_encode_always_signs_under_the_current_secret_not_a_previous_one
+    cookie = Prism::Session.encode({ 'user' => 'foksiu' }, 'new-secret')
+    assert_equal({}, Prism::Session.decode(cookie, 'old-secret'))
+    assert_equal 'foksiu', Prism::Session.decode(cookie, 'new-secret')['user']
+  end
 end

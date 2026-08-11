@@ -52,4 +52,16 @@ class ViewTest < Minitest::Test
     error = assert_raises(Prism::View::TemplateNotFound) { @view.render('posts/missing') }
     assert_includes error.message, 'posts/missing'
   end
+
+  def test_render_emits_a_render_template_event_per_template_file
+    events = []
+    subscriber = Prism::Instrumentation.subscribe('render_template.prism') { |event| events << event }
+    begin
+      @view.render('posts/index', locals: { greeting: 'hi' }, layout: :application)
+    ensure
+      Prism::Instrumentation.unsubscribe(subscriber)
+    end
+
+    assert_equal %w[posts/index layouts/application], events.map { |e| e.payload[:identifier] }
+  end
 end
