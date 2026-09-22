@@ -3,14 +3,6 @@ class PasswordResetsController < ApplicationController
     render(:new)
   end
 
-  # Always shows the SAME generic "check your email" notice whether or not
-  # the address belongs to an account - branching the response on
-  # User.find_by(email:) here would turn this form into an email-enumeration
-  # oracle one guess at a time, the same concern app.rb's signups/ip
-  # throttle exists for one step earlier in the account lifecycle (and this
-  # action gets its own password_resets/ip throttle below for the same
-  # reason: even a constant-response endpoint still leaks timing/rate
-  # information if it can be hit without limit).
   def create
     email = params.require('password_reset').permit(:email).to_h['email']
     user = User.find_by(email: email)
@@ -32,13 +24,6 @@ class PasswordResetsController < ApplicationController
     end
   end
 
-  # find_by_token_for's fingerprint block (see User#generates_token_for)
-  # snapshots password_digest at #new/#create time - so the very save
-  # below that sets the new password also produces a new digest, which
-  # means the SAME token this action just accepted can never verify again
-  # afterwards. A stolen-but-unused link still dies once its owner resets
-  # through it; there is no separate "used" flag or token table to keep
-  # that guarantee true.
   def update
     user = User.find_by_token_for(:password_reset, params['token'])
     unless user

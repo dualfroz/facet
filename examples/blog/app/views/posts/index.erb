@@ -1,5 +1,4 @@
 <% content_for(:sidebar) do %>
-  <%# Deliberately NOT keyed on current_user, unlike the fresh_when etag on this same action: the 5 most recent post titles/links are identical for every viewer, and the signed-in-as banner + new-post form that DO vary per viewer render outside this block, never inside the cached fragment. See prism-postep.md session 62/64. %>
   <% cache(:recent_posts_sidebar, expires_in: 60) do %>
     <h2><%= t('posts.recent_heading') %></h2>
     <ul>

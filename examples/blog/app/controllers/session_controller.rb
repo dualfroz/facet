@@ -22,10 +22,6 @@ class SessionController < ApplicationController
           status(422)
           render(:new, locals: { errors: [t('sessions.invalid_credentials')] })
         end
-        # 401, not 422 like the HTML branch above: there is no resource
-        # here whose validation failed (no User object at all when the
-        # email does not match anyone), just a rejected authentication
-        # attempt - the JSON:API status a client should actually branch on.
         format.json do
           json({ errors: [jsonapi_error(status: 401, pointer: '/data/attributes/password',
                                          title: 'invalid credentials', detail: t('sessions.invalid_credentials'))] }, 401)

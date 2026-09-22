@@ -29,9 +29,6 @@
 </table>
 <% end %>
 
-<!-- post.title here is read straight off `post` AFTER Dirty#restore_attributes -
-     it must be the row's actual saved title, proving the preview above never
-     mutated the persisted record. -->
 <p><%= t('posts.preview_currently_saved', title: post.title) %></p>
 
 <% if errors.empty? %>
