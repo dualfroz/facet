@@ -1,4 +1,4 @@
-class AddDeletedAtToCommentsAndLikes < Prism::Orm::Migration
+class AddDeletedAtToCommentsAndLikes < Facet::Orm::Migration
   def up
     add_column :comments, :deleted_at, :datetime, default: nil
     add_column :likes, :deleted_at, :datetime, default: nil

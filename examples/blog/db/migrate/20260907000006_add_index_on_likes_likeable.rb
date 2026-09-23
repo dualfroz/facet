@@ -1,4 +1,4 @@
-class AddIndexOnLikesLikeable < Prism::Orm::Migration
+class AddIndexOnLikesLikeable < Facet::Orm::Migration
   def up
     add_index :likes, %i[likeable_id likeable_type]
   end

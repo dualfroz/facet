@@ -1,4 +1,4 @@
-class PostPolicy < Prism::Policy
+class PostPolicy < Facet::Policy
   def update?
     user && record.user_id == user.id
   end

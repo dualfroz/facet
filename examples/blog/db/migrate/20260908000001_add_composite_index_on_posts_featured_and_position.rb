@@ -1,4 +1,4 @@
-class AddCompositeIndexOnPostsFeaturedAndPosition < Prism::Orm::Migration
+class AddCompositeIndexOnPostsFeaturedAndPosition < Facet::Orm::Migration
   def up
     add_index :posts, %i[featured position]
   end

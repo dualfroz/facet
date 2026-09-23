@@ -1,4 +1,4 @@
-class AddPositionToPosts < Prism::Orm::Migration
+class AddPositionToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :position
   end

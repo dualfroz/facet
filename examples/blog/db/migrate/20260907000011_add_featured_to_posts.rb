@@ -1,4 +1,4 @@
-class AddFeaturedToPosts < Prism::Orm::Migration
+class AddFeaturedToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :featured, default: false
   end

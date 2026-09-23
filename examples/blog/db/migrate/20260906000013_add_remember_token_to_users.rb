@@ -1,4 +1,4 @@
-class AddRememberTokenToUsers < Prism::Orm::Migration
+class AddRememberTokenToUsers < Facet::Orm::Migration
   def up
     add_column :users, :remember_token, default: nil
   end

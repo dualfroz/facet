@@ -1,4 +1,4 @@
-class AddIndexOnPostsCreatedAt < Prism::Orm::Migration
+class AddIndexOnPostsCreatedAt < Facet::Orm::Migration
   def up
     add_index :posts, :created_at
   end

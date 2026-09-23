@@ -1,4 +1,4 @@
-class CreatePosts < Prism::Orm::Migration
+class CreatePosts < Facet::Orm::Migration
   def up
     create_table :posts do |t|
       t.string :title

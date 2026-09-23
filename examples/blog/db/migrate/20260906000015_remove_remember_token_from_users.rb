@@ -1,4 +1,4 @@
-class RemoveRememberTokenFromUsers < Prism::Orm::Migration
+class RemoveRememberTokenFromUsers < Facet::Orm::Migration
   def up
     remove_column :users, :remember_token
   end

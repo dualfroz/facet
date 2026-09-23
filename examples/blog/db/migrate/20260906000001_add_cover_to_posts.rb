@@ -1,4 +1,4 @@
-class AddCoverToPosts < Prism::Orm::Migration
+class AddCoverToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :cover, default: nil
   end

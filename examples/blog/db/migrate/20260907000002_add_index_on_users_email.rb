@@ -1,4 +1,4 @@
-class AddIndexOnUsersEmail < Prism::Orm::Migration
+class AddIndexOnUsersEmail < Facet::Orm::Migration
   def up
     add_index :users, :email, unique: true
   end

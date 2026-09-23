@@ -1,4 +1,4 @@
-class AddIndexOnCommentsPostId < Prism::Orm::Migration
+class AddIndexOnCommentsPostId < Facet::Orm::Migration
   def up
     add_index :comments, :post_id
   end

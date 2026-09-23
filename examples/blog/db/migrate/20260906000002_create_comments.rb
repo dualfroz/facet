@@ -1,4 +1,4 @@
-class CreateComments < Prism::Orm::Migration
+class CreateComments < Facet::Orm::Migration
   def up
     create_table :comments do |t|
       t.integer :post_id

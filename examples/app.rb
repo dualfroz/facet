@@ -1,9 +1,9 @@
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
-require 'prism'
+require 'facet'
 
-class ExampleApp < Prism::Application
-  enable_sessions(secret: 'prism-demo-secret')
-  use Prism::Middleware::Logger
+class ExampleApp < Facet::Application
+  enable_sessions(secret: 'facet-demo-secret')
+  use Facet::Middleware::Logger
 
   helpers do
     def layout(title, inner)
@@ -16,7 +16,7 @@ class ExampleApp < Prism::Application
   end
 
   get '/' do
-    html('<h1>Prism</h1>')
+    html('<h1>Facet</h1>')
   end
 
   get '/hello/:name' do
@@ -53,8 +53,8 @@ class ExampleApp < Prism::Application
 end
 
 if __FILE__ == $PROGRAM_NAME
-  server = Prism::Server.new(ExampleApp, port: (ARGV[0] || 0).to_i).start
-  puts "Prism example listening on #{server.url}"
+  server = Facet::Server.new(ExampleApp, port: (ARGV[0] || 0).to_i).start
+  puts "Facet example listening on #{server.url}"
   trap('INT') do
     server.stop
     exit

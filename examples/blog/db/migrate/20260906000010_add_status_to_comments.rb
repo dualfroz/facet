@@ -1,4 +1,4 @@
-class AddStatusToComments < Prism::Orm::Migration
+class AddStatusToComments < Facet::Orm::Migration
   def up
     add_column :comments, :status, :integer, default: 0
   end

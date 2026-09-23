@@ -3,8 +3,8 @@
     "forbidden": "You are not allowed to do that."
   },
   "blog": {
-    "title": "Prism Blog",
-    "tagline": "A tiny blog built entirely on Prism subsystems."
+    "title": "Facet Blog",
+    "tagline": "A tiny blog built entirely on Facet subsystems."
   },
   "nav": {
     "home": "Home",

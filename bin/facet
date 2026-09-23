@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
+require 'facet'
+
+begin
+  Facet::Cli.new.run(ARGV)
+rescue Facet::Cli::UsageError => e
+  warn "error: #{e.message}"
+  exit 1
+end

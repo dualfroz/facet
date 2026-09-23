@@ -1,4 +1,4 @@
-class AddClaimsCountToPosts < Prism::Orm::Migration
+class AddClaimsCountToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :claims_count, :integer, default: 0
   end

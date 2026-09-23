@@ -1,4 +1,4 @@
-class AddIndexOnLoginSessionsUserId < Prism::Orm::Migration
+class AddIndexOnLoginSessionsUserId < Facet::Orm::Migration
   def up
     add_index :login_sessions, :user_id
   end

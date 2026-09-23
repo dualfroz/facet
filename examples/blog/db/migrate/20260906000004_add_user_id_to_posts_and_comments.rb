@@ -1,4 +1,4 @@
-class AddUserIdToPostsAndComments < Prism::Orm::Migration
+class AddUserIdToPostsAndComments < Facet::Orm::Migration
   def up
     add_column :posts, :user_id
     add_column :comments, :user_id

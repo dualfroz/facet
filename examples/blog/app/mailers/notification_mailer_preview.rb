@@ -1,4 +1,4 @@
-class NotificationMailerPreview < Prism::Mailer::Preview
+class NotificationMailerPreview < Facet::Mailer::Preview
   def new_post
     post = Post.first || Post.create_with_unique_slug(title: 'Preview Post', body: 'Fixture body for mailer previews.')
     NotificationMailer.new_post(post.id)

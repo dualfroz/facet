@@ -25,14 +25,7 @@ class UsersController < ApplicationController
         format.json { render_errors(user) }
       end
     end
-  # The unique index on users.email (see db/migrate) is a storage-level
-  # constraint, not just the app-level `validates :email, uniqueness: true`
-  # above - it still fires for anything that reaches Store#insert without
-  # going through Model#valid? first (a racing concurrent signup that read
-  # the table before the other one committed, a future admin script, a bug
-  # elsewhere that skips validation). #create can't tell those apart from a
-  # normal duplicate, so it reports the same friendly message either way.
-  rescue Prism::Orm::Store::UniqueConstraintViolation
+  rescue Facet::Orm::Store::UniqueConstraintViolation
     respond_to do |format|
       format.html do
         status(422)

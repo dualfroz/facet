@@ -1,4 +1,4 @@
-class CreateUsers < Prism::Orm::Migration
+class CreateUsers < Facet::Orm::Migration
   def up
     create_table :users do |t|
       t.string :email

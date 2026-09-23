@@ -1,4 +1,4 @@
-class AddConfirmedAtToUsers < Prism::Orm::Migration
+class AddConfirmedAtToUsers < Facet::Orm::Migration
   def up
     add_column :users, :confirmed_at, :datetime, default: nil
   end

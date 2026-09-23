@@ -1,4 +1,4 @@
-class CreateLikes < Prism::Orm::Migration
+class CreateLikes < Facet::Orm::Migration
   def up
     create_table :likes do |t|
       t.integer :user_id

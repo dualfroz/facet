@@ -1,4 +1,4 @@
-class AddLockVersionToPosts < Prism::Orm::Migration
+class AddLockVersionToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :lock_version, :integer, default: 0
   end

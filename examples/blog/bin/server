@@ -1,14 +1,8 @@
 require_relative '../app'
 
-# A hard cap on the total number of live WebSocket connections this
-# process will hold open at once (across every post's /cable stream
-# combined), distinct from PostActivityChannel::MAX_VIEWERS_PER_POST which
-# only bounds a single stream - without this, enough popular posts could
-# still exhaust the process's file descriptors even though no individual
-# post ever hits its own per-stream limit.
 MAX_WEBSOCKET_CONNECTIONS = 2000
 
-server = Prism::Server.new(
+server = Facet::Server.new(
   Blog,
   port: (ARGV[0] || 3000).to_i,
   max_websocket_connections: MAX_WEBSOCKET_CONNECTIONS

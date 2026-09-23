@@ -1,4 +1,4 @@
-class AddUserAgentAndIpToLoginSessions < Prism::Orm::Migration
+class AddUserAgentAndIpToLoginSessions < Facet::Orm::Migration
   def up
     add_column :login_sessions, :user_agent, default: nil
     add_column :login_sessions, :ip_address, default: nil

@@ -1,4 +1,4 @@
-class AddLockVersionToComments < Prism::Orm::Migration
+class AddLockVersionToComments < Facet::Orm::Migration
   def up
     add_column :comments, :lock_version, :integer, default: 0
   end

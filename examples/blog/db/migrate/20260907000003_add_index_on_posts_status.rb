@@ -1,4 +1,4 @@
-class AddIndexOnPostsStatus < Prism::Orm::Migration
+class AddIndexOnPostsStatus < Facet::Orm::Migration
   def up
     add_index :posts, :status
   end

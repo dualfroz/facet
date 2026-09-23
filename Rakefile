@@ -5,5 +5,5 @@ task :test do
 end
 
 task :demo do
-  sh 'ruby demo.rb'
+  sh 'ruby examples/demo.rb'
 end

@@ -1,4 +1,4 @@
-class AddDeletedAtToPosts < Prism::Orm::Migration
+class AddDeletedAtToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :deleted_at, :datetime, default: nil
   end

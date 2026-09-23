@@ -1,4 +1,4 @@
-class AddStatusToPosts < Prism::Orm::Migration
+class AddStatusToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :status, :integer, default: 0
   end

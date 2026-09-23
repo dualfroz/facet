@@ -1,4 +1,4 @@
-class AddCommentsCountToPosts < Prism::Orm::Migration
+class AddCommentsCountToPosts < Facet::Orm::Migration
   def up
     add_column :posts, :comments_count, :integer, default: 0
   end
