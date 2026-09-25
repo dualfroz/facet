@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 class MiddlewareParamsTest < Minitest::Test
@@ -11,7 +11,7 @@ class MiddlewareParamsTest < Minitest::Test
       @seen_env = env
       [200, {}, ['ok']]
     end
-    @app = Prism::Middleware::ParamsParser.new(downstream)
+    @app = Facet::Middleware::ParamsParser.new(downstream)
   end
 
   def test_valid_json_body_passes_through

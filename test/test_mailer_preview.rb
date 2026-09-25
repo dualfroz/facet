@@ -1,16 +1,16 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class MailerPreviewTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-mailer-preview')
+    @dir = Dir.mktmpdir('facet-mailer-preview')
     FileUtils.mkdir_p(File.join(@dir, 'preview_user'))
     File.write(File.join(@dir, 'preview_user/welcome.text.erb'), "Hi <%= name %>\n")
 
     mailer_dir = @dir
-    @mailer_class = Class.new(Prism::Mailer::Base) do
+    @mailer_class = Class.new(Facet::Mailer::Base) do
       self.template_roots = [mailer_dir]
 
       def welcome(name)
@@ -21,14 +21,14 @@ class MailerPreviewTest < Minitest::Test
     Object.const_set(:PreviewUserMailer, @mailer_class)
 
     mailer_class = @mailer_class
-    @preview_class = Class.new(Prism::Mailer::Preview) do
+    @preview_class = Class.new(Facet::Mailer::Preview) do
       define_method(:welcome) { mailer_class.welcome('Fixture Fred') }
     end
     Object.const_set(:UserMailerPreview, @preview_class)
   end
 
   def teardown
-    Prism::Mailer::Preview.registry.delete(@preview_class)
+    Facet::Mailer::Preview.registry.delete(@preview_class)
     %i[UserMailerPreview PreviewUserMailer].each do |name|
       Object.send(:remove_const, name) if Object.const_defined?(name)
     end
@@ -36,7 +36,7 @@ class MailerPreviewTest < Minitest::Test
   end
 
   def test_subclassing_registers_the_preview
-    assert_includes Prism::Mailer::Preview.registry, UserMailerPreview
+    assert_includes Facet::Mailer::Preview.registry, UserMailerPreview
   end
 
   def test_preview_name_strips_the_preview_suffix_and_underscores
@@ -53,9 +53,9 @@ class MailerPreviewTest < Minitest::Test
   end
 
   def test_call_never_delivers_the_message
-    Prism::Mailer.deliveries.clear
+    Facet::Mailer.deliveries.clear
     UserMailerPreview.call(:welcome)
-    assert_empty Prism::Mailer.deliveries
+    assert_empty Facet::Mailer.deliveries
   end
 
   def test_call_raises_for_an_unknown_email
@@ -64,7 +64,7 @@ class MailerPreviewTest < Minitest::Test
   end
 
   def test_find_looks_up_a_registered_preview_by_name
-    assert_equal UserMailerPreview, Prism::Mailer::Preview.find('user_mailer')
-    assert_nil Prism::Mailer::Preview.find('nonexistent')
+    assert_equal UserMailerPreview, Facet::Mailer::Preview.find('user_mailer')
+    assert_nil Facet::Mailer::Preview.find('nonexistent')
   end
 end

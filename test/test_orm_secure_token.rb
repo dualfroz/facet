@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmSecureTokenTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-secure-token-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-secure-token-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:api_keys, %w[id name token auth_token])
-    api_key_class = Class.new(Prism::Orm::Model) do
+    api_key_class = Class.new(Facet::Orm::Model) do
       table_name :api_keys
       has_secure_token
       has_secure_token :auth_token, length: 6
@@ -62,7 +62,7 @@ class OrmSecureTokenTest < Minitest::Test
   end
 
   def test_generate_produces_a_urlsafe_string_of_the_requested_byte_length
-    token = Prism::Orm::SecureToken.generate(6)
+    token = Facet::Orm::SecureToken.generate(6)
     assert_match(/\A[A-Za-z0-9_-]+\z/, token)
   end
 

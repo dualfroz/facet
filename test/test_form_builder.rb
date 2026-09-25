@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class FormBuilderTest < Minitest::Test
   FakeErrors = Struct.new(:store) do
@@ -25,7 +25,7 @@ class FormBuilderTest < Minitest::Test
   end
 
   def builder_for(model, object_name: nil)
-    Prism::FormBuilder.new(model, object_name: object_name)
+    Facet::FormBuilder.new(model, object_name: object_name)
   end
 
   def test_text_field_uses_rails_style_nested_name_and_id

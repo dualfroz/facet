@@ -1,19 +1,19 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmAssociationsTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-assoc-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-assoc-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:authors, %w[id name])
     @store.create_table(:posts, %w[id title author_id])
 
-    author_class = Class.new(Prism::Orm::Model) do
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :posts, class_name: 'Post', foreign_key: 'author_id'
     end
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
@@ -29,13 +29,13 @@ class OrmAssociationsTest < Minitest::Test
   end
 
   def test_belongs_to_returns_associated_record
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     post = Post.create!(title: 'hello', author_id: author.id)
     assert_equal author, post.author
   end
 
   def test_belongs_to_setter_updates_foreign_key
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     post = Post.create!(title: 'hello')
     post.author = author
     assert_equal author.id, post.author_id
@@ -47,7 +47,7 @@ class OrmAssociationsTest < Minitest::Test
   end
 
   def test_has_many_returns_associated_records
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     Post.create!(title: 'first', author_id: author.id)
     Post.create!(title: 'second', author_id: author.id)
     Post.create!(title: 'not mine', author_id: nil)

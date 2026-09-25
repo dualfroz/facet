@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'json'
 
 class OrmAttributesTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-attributes-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-attributes-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id title featured views price published_at])
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       attribute :featured, :boolean, default: false
       attribute :views, :integer
@@ -54,7 +54,7 @@ class OrmAttributesTest < Minitest::Test
   end
 
   def test_proc_default_is_evaluated_per_instance
-    Object.const_set(:Gadget, Class.new(Prism::Orm::Model) do
+    Object.const_set(:Gadget, Class.new(Facet::Orm::Model) do
       table_name :widgets
       attribute :views, :integer, default: -> { 7 }
     end)
@@ -86,7 +86,7 @@ class OrmAttributesTest < Minitest::Test
   end
 
   def test_invalid_input_raises_invalid_cast_instead_of_saving_garbage
-    assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Widget.new(title: 'a', views: 'not-a-number') }
+    assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Widget.new(title: 'a', views: 'not-a-number') }
   end
 
   def test_serializable_hash_reflects_the_cast_type_not_the_raw_string
@@ -96,15 +96,8 @@ class OrmAttributesTest < Minitest::Test
     assert_equal 42, payload['views']
   end
 
-  # Same regression shape as Callbacks#callbacks_for / Controller#before_actions
-  # (documented in this project's history as a bug found three separate
-  # times: a class-level registry stored as a plain `@ivar ||= {}` per
-  # class, with no superclass fallback, silently drops whatever a base
-  # class declared as soon as a subclass declares its own). attribute_types/
-  # attribute_defaults use the same superclass-plus-own merge, so this
-  # proves a subclass's own `attribute` call does not erase its parent's.
   def test_subclass_inherits_the_parent_classes_declared_attributes
-    Object.const_set(:Gadget, Class.new(Prism::Orm::Model) do
+    Object.const_set(:Gadget, Class.new(Facet::Orm::Model) do
       table_name :widgets
       attribute :featured, :boolean, default: false
     end)

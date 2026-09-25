@@ -1,12 +1,12 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmMigrationTest < Minitest::Test
   def setup
-    @store_dir = Dir.mktmpdir('prism-migration-store')
-    @migrations_dir = Dir.mktmpdir('prism-migration-files')
-    @store = Prism::Orm::Store.new(File.join(@store_dir, 'test.pstore'))
+    @store_dir = Dir.mktmpdir('facet-migration-store')
+    @migrations_dir = Dir.mktmpdir('facet-migration-files')
+    @store = Facet::Orm::Store.new(File.join(@store_dir, 'test.pstore'))
   end
 
   def teardown
@@ -15,9 +15,9 @@ class OrmMigrationTest < Minitest::Test
   end
 
   def write_migration(version, class_name, body)
-    path = File.join(@migrations_dir, "#{version}_#{Prism::Inflector.underscore(class_name)}.rb")
+    path = File.join(@migrations_dir, "#{version}_#{Facet::Inflector.underscore(class_name)}.rb")
     File.write(path, <<~RUBY)
-      class #{class_name} < Prism::Orm::Migration
+      class #{class_name} < Facet::Orm::Migration
         #{body}
       end
     RUBY
@@ -37,7 +37,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator = Facet::Orm::Migrator.new(@store, @migrations_dir)
     applied = migrator.migrate!
 
     assert_equal ['20260101000001'], applied
@@ -56,7 +56,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator = Facet::Orm::Migrator.new(@store, @migrations_dir)
     assert_equal 1, migrator.pending.size
     migrator.migrate!
     assert_empty migrator.pending
@@ -73,7 +73,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator = Facet::Orm::Migrator.new(@store, @migrations_dir)
     migrator.migrate!
     assert @store.table_exists?(:sprockets_for_migration_test)
 
@@ -103,7 +103,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator = Facet::Orm::Migrator.new(@store, @migrations_dir)
     migrator.migrate!
     migrator.rollback!
 
@@ -134,7 +134,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    migrator = Prism::Orm::Migrator.new(@store, @migrations_dir)
+    migrator = Facet::Orm::Migrator.new(@store, @migrations_dir)
     migrator.migrate!
     assert @store.table_exists?(:multi_rollback_a)
     assert @store.table_exists?(:multi_rollback_b)
@@ -159,7 +159,7 @@ class OrmMigrationTest < Minitest::Test
       end
     RUBY
 
-    Prism::Orm::Migrator.new(@store, @migrations_dir).migrate!
+    Facet::Orm::Migrator.new(@store, @migrations_dir).migrate!
     assert_includes @store.columns(:thingies_for_migration_test), 'active'
   end
 
@@ -180,7 +180,7 @@ class OrmMigrationTest < Minitest::Test
       def down; end
     RUBY
 
-    Prism::Orm::Migrator.new(@store, @migrations_dir).migrate!
+    Facet::Orm::Migrator.new(@store, @migrations_dir).migrate!
     steps = @store.all(:ordering_test_log).map { |row| row['step'] }
     assert_equal %w[first second], steps
   end

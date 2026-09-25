@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'net/http'
 
-class IntegrationApp < Prism::Application
+class IntegrationApp < Facet::Application
   get '/ping' do
     json(pong: true)
   end
@@ -19,7 +19,7 @@ end
 
 class IntegrationTest < Minitest::Test
   def setup
-    @server = Prism::Server.new(IntegrationApp, port: 0).start
+    @server = Facet::Server.new(IntegrationApp, port: 0).start
     @port = @server.port
   end
 

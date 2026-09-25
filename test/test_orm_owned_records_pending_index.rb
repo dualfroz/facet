@@ -1,33 +1,21 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# The shape AccountController#moderation actually issues (examples/blog): find
-# the ids of every record a user owns (an equality lookup on a foreign key,
-# like Store#lookup_by_index), then filter a second table down to just the
-# ones whose foreign key is IN that id list AND some other column equals a
-# fixed value (Comment.pending.where(post_id: owned_post_ids) in the real
-# app). That second query is an AndNode of a HashNode Array (IN-list) and a
-# HashNode scalar (equality) - ConditionNode#indexed_candidates only tries
-# lookup_by_index_in for a column actually present in #indexable_in_lists,
-# so it is the post_id side (an Array) that must be indexed for this to
-# avoid a scan; the leftover status equality is filtered from that already-
-# narrow candidate set in memory afterward by Relation#rows, exactly the way
-# OrmHasManyPolymorphicForeignKeyIndexTest proves for a two-column equality.
 class OrmOwnedRecordsPendingIndexTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-owned-pending-index-store')
+    @dir = Dir.mktmpdir('facet-owned-pending-index-store')
     @store = CountingOwnedPendingIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:mod_owners, %w[id name])
     @store.create_table(:mod_posts, %w[id user_id title])
     @store.create_table(:mod_comments, %w[id post_id status body])
 
-    owner_class = Class.new(Prism::Orm::Model) do
+    owner_class = Class.new(Facet::Orm::Model) do
       table_name :mod_owners
       has_many :posts, class_name: 'ModPost', foreign_key: 'user_id'
     end
-    post_class = Class.new(Prism::Orm::Model) { table_name :mod_posts }
-    comment_class = Class.new(Prism::Orm::Model) { table_name :mod_comments }
+    post_class = Class.new(Facet::Orm::Model) { table_name :mod_posts }
+    comment_class = Class.new(Facet::Orm::Model) { table_name :mod_comments }
     [owner_class, post_class, comment_class].each { |klass| klass.store = @store }
     Object.const_set(:ModOwner, owner_class)
     Object.const_set(:ModPost, post_class)
@@ -38,9 +26,6 @@ class OrmOwnedRecordsPendingIndexTest < Minitest::Test
     @alice_post = ModPost.create!(user_id: @alice.id, title: 'alices post')
     @bob_post = ModPost.create!(user_id: @bob.id, title: 'bobs post')
 
-    # 0 = pending, 1 = approved - plain integers here (not a real enum
-    # module) since this test is only about index selection, not Enum's
-    # label<->value translation, which already has its own coverage.
     ModComment.create!(post_id: @alice_post.id, status: 0, body: 'waiting on alice')
     ModComment.create!(post_id: @alice_post.id, status: 1, body: 'already approved')
     ModComment.create!(post_id: @bob_post.id, status: 0, body: 'waiting on bob')
@@ -100,11 +85,7 @@ class OrmOwnedRecordsPendingIndexTest < Minitest::Test
   end
 end
 
-# Same wrapper shape as CountingFkIndexStore (test_orm_has_many_foreign_key_
-# index.rb), extended with an IN-list hit counter since this file is
-# specifically exercising Store#lookup_by_index_in rather than plain
-# Store#lookup_by_index.
-class CountingOwnedPendingIndexStore < Prism::Orm::Store
+class CountingOwnedPendingIndexStore < Facet::Orm::Store
   attr_reader :scan_count, :in_list_hits
 
   def initialize(*args)

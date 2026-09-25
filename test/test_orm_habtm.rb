@@ -1,21 +1,21 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmHabtmTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-habtm-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-habtm-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:students, %w[id name])
     @store.create_table(:courses, %w[id title])
     @store.create_table(:courses_students, %w[id course_id student_id])
 
-    student_class = Class.new(Prism::Orm::Model) do
+    student_class = Class.new(Facet::Orm::Model) do
       table_name :students
       has_and_belongs_to_many :courses, class_name: 'Course', join_table: 'courses_students',
                                          foreign_key: 'student_id', association_foreign_key: 'course_id'
     end
-    course_class = Class.new(Prism::Orm::Model) do
+    course_class = Class.new(Facet::Orm::Model) do
       table_name :courses
       has_and_belongs_to_many :students, class_name: 'Student', join_table: 'courses_students',
                                           foreign_key: 'course_id', association_foreign_key: 'student_id'
@@ -65,8 +65,8 @@ class OrmHabtmTest < Minitest::Test
     alice.courses.delete(math)
 
     assert_equal 0, alice.courses.count
-    assert Student.find(alice.id) # student itself untouched
-    assert Course.find(math.id) # course itself untouched
+    assert Student.find(alice.id)
+    assert Course.find(math.id)
   end
 
   def test_replace_via_setter_swaps_full_set

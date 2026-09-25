@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class RouterWebSocketTest < Minitest::Test
   def setup
-    @router = Prism::Router.new
+    @router = Facet::Router.new
   end
 
   def test_find_websocket_returns_the_registered_handler

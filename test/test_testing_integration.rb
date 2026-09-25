@@ -1,7 +1,7 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
-class IntegrationSampleApp < Prism::Application
+class IntegrationSampleApp < Facet::Application
   enable_sessions(secret: 'integration-test-secret')
 
   get '/' do
@@ -54,7 +54,7 @@ class IntegrationSampleApp < Prism::Application
 end
 
 class IntegrationTestingTest < Minitest::Test
-  include Prism::Testing::IntegrationTest
+  include Facet::Testing::IntegrationTest
   integration_app IntegrationSampleApp
 
   def test_get_root
@@ -111,8 +111,8 @@ class IntegrationTestingTest < Minitest::Test
   end
 
   def test_two_sessions_do_not_share_cookies
-    browser_a = Prism::Testing::IntegrationSession.new(IntegrationSampleApp)
-    browser_b = Prism::Testing::IntegrationSession.new(IntegrationSampleApp)
+    browser_a = Facet::Testing::IntegrationSession.new(IntegrationSampleApp)
+    browser_b = Facet::Testing::IntegrationSession.new(IntegrationSampleApp)
 
     browser_a.post('/login', params: { user: { name: 'alice' } })
     browser_a.follow_redirect!
@@ -130,8 +130,8 @@ class IntegrationTestingTest < Minitest::Test
   end
 
   def test_remote_addr_can_be_simulated_per_request
-    get '/ip', remote_addr: '10.0.0.7'
-    assert_equal '10.0.0.7', response.body
+    get '/ip', remote_addr: '203.0.113.7'
+    assert_equal '203.0.113.7', response.body
 
     get '/ip'
     assert_equal '127.0.0.1', response.body
@@ -147,12 +147,6 @@ class IntegrationTestingTest < Minitest::Test
     assert_raises(ArgumentError) { assert_response(:teapot) }
   end
 
-  # Prism::StreamingBody responses never touch a real socket in this
-  # harness (see Prism::Testing::TestResponse#initialize) - IntegrationTest
-  # itself only ever exercised Controller actions with an ordinary Array
-  # body, so nothing proved the `get`/`post` DSL methods here could drive a
-  # streaming route through Application#call without blowing up on
-  # finalize_body's `streaming?` guard or on the join-based TestResponse.
   def test_streaming_route_is_drained_into_the_response_body_in_order
     get '/export'
     assert_response :success

@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 require 'tmpdir'
 require 'fileutils'
@@ -8,13 +8,13 @@ class MailerPreviewAppTest < Minitest::Test
   include TestSupport
 
   def setup
-    @dir = Dir.mktmpdir('prism-mailer-preview-app')
+    @dir = Dir.mktmpdir('facet-mailer-preview-app')
     FileUtils.mkdir_p(File.join(@dir, 'preview_widget'))
     File.write(File.join(@dir, 'preview_widget/welcome.text.erb'), "Hi <%= name %>\n")
     File.write(File.join(@dir, 'preview_widget/welcome.html.erb'), "<p>Hi <%= name %></p>\n")
 
     mailer_dir = @dir
-    @mailer_class = Class.new(Prism::Mailer::Base) do
+    @mailer_class = Class.new(Facet::Mailer::Base) do
       self.template_roots = [mailer_dir]
 
       def welcome(name)
@@ -25,16 +25,16 @@ class MailerPreviewAppTest < Minitest::Test
     Object.const_set(:PreviewWidgetMailer, @mailer_class)
 
     mailer_class = @mailer_class
-    @preview_class = Class.new(Prism::Mailer::Preview) do
+    @preview_class = Class.new(Facet::Mailer::Preview) do
       define_method(:welcome) { mailer_class.welcome('Fixture Fred') }
     end
     Object.const_set(:WidgetMailerPreview, @preview_class)
 
-    @app = Prism::Mailer::PreviewApp.new
+    @app = Facet::Mailer::PreviewApp.new
   end
 
   def teardown
-    Prism::Mailer::Preview.registry.delete(@preview_class)
+    Facet::Mailer::Preview.registry.delete(@preview_class)
     %i[WidgetMailerPreview PreviewWidgetMailer].each do |name|
       Object.send(:remove_const, name) if Object.const_defined?(name)
     end
@@ -68,9 +68,9 @@ class MailerPreviewAppTest < Minitest::Test
   end
 
   def test_email_page_never_delivers_the_message
-    Prism::Mailer.deliveries.clear
+    Facet::Mailer.deliveries.clear
     call('/widget_mailer/welcome')
-    assert_empty Prism::Mailer.deliveries
+    assert_empty Facet::Mailer.deliveries
   end
 
   def test_unknown_preview_is_a_404
@@ -89,8 +89,8 @@ class MailerPreviewAppTest < Minitest::Test
   end
 
   def test_mounted_end_to_end_through_an_application
-    host_app = Class.new(Prism::Application) do
-      mount '/rails/mailers', Prism::Mailer::PreviewApp.new
+    host_app = Class.new(Facet::Application) do
+      mount '/rails/mailers', Facet::Mailer::PreviewApp.new
     end
 
     status, _, body = host_app.call(env_for('GET', '/rails/mailers/widget_mailer/welcome'))

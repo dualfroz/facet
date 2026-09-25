@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class SampleApp < Prism::Application
+class SampleApp < Facet::Application
   enable_sessions(secret: 'test-secret')
 
   before '/admin/*' do
@@ -73,8 +73,8 @@ class ApplicationTest < Minitest::Test
   end
 
   def test_query_param
-    _, _, body = call('GET', '/search?q=prism')
-    assert_equal({ 'q' => 'prism' }, JSON.parse(body.join))
+    _, _, body = call('GET', '/search?q=facet')
+    assert_equal({ 'q' => 'facet' }, JSON.parse(body.join))
   end
 
   def test_post_json
@@ -136,11 +136,11 @@ class ApplicationTest < Minitest::Test
 
   def test_dispatch_emits_process_action_event_with_status
     events = []
-    subscriber = Prism::Instrumentation.subscribe('process_action.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('process_action.facet') { |event| events << event }
     begin
       call('GET', '/users/9')
     ensure
-      Prism::Instrumentation.unsubscribe(subscriber)
+      Facet::Instrumentation.unsubscribe(subscriber)
     end
 
     assert_equal 1, events.size
@@ -151,11 +151,11 @@ class ApplicationTest < Minitest::Test
 
   def test_dispatch_emits_event_for_not_found_too
     events = []
-    subscriber = Prism::Instrumentation.subscribe('process_action.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('process_action.facet') { |event| events << event }
     begin
       call('GET', '/missing')
     ensure
-      Prism::Instrumentation.unsubscribe(subscriber)
+      Facet::Instrumentation.unsubscribe(subscriber)
     end
 
     assert_equal 1, events.size

@@ -1,42 +1,24 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# Fixtures built once at file-load time (same shared-once idiom as
-# TransactionalFixtures in test_testing_transactional.rb) instead of the
-# per-test Dir.mktmpdir/FileUtils.remove_entry setup/teardown every other
-# *_orm test file repeats - safe here because `use_transactional_tests`
-# rolls each test's writes back, so nothing needs re-seeding between runs.
-#
-# PreviewApp mirrors PostsController#preview/#update from examples/blog
-# closely enough to exercise the same assign -> valid? -> changes ->
-# restore_attributes sequence, and the same optimistic-locking
-# StaleObjectError path, through a REAL HTTP request cycle - something only
-# ever exercised end-to-end via blog_demo.rb until now. It does not require
-# examples/blog/app.rb itself: that file calls `Prism::Orm.connect` against
-# a real on-disk dev database as a process-wide global, which would leak
-# into every other test in this suite that relies on `Prism::Orm.store`.
 module PreviewFixtures
-  DIR = Dir.mktmpdir('prism-preview-integration')
-  STORE = Prism::Orm::Store.new(File.join(DIR, 'test.pstore'))
+  DIR = Dir.mktmpdir('facet-preview-integration')
+  STORE = Facet::Orm::Store.new(File.join(DIR, 'test.pstore'))
   STORE.create_table(:preview_posts, %w[id title body lock_version])
 
-  class PreviewPost < Prism::Orm::Model
+  class PreviewPost < Facet::Orm::Model
     self.store = STORE
     table_name :preview_posts
     validates :title, presence: true
   end
 
-  class PreviewApp < Prism::Application
+  class PreviewApp < Facet::Application
     get('/posts/:id') do
       post = PreviewPost.find(params['id'])
       json(id: post.id, title: post.title, body: post.body, lock_version: post.lock_version)
     end
 
-    # Same shape as PostsController#preview: dirty-track a proposed edit,
-    # capture the diff and any validation errors, then restore the record
-    # to exactly what was persisted before responding - nothing here ever
-    # calls #save.
     patch('/posts/:id/preview') do
       post = PreviewPost.find(params['id'])
       attempted = params.require('post').permit(:title, :body, :lock_version).to_h
@@ -54,7 +36,7 @@ module PreviewFixtures
       begin
         post.save!
         json(id: post.id, title: post.title, lock_version: post.lock_version)
-      rescue Prism::Orm::StaleObjectError
+      rescue Facet::Orm::StaleObjectError
         halt(409, 'stale object')
       end
     end
@@ -62,7 +44,7 @@ module PreviewFixtures
 end
 
 class IntegrationPreviewTest < Minitest::Test
-  include Prism::Testing::IntegrationTest
+  include Facet::Testing::IntegrationTest
   integration_app PreviewFixtures::PreviewApp
   use_transactional_tests(store: PreviewFixtures::STORE)
 
@@ -101,7 +83,7 @@ class IntegrationPreviewTest < Minitest::Test
 
     patch("/posts/#{post.id}/preview",
           params: { post: { title: 'Whatever I typed', body: 'body', lock_version: stale_lock_version } })
-    assert_response :success # must not raise StaleObjectError - it only diffs, it never saves
+    assert_response :success
     assert_equal 'a concurrent edit landed first', response.json['current_body']
   end
 

@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class ArticlesController < Prism::Controller
+class ArticlesController < Facet::Controller
   def index = html('articles-index')
   def show = html("article-#{params['id']}")
 
@@ -15,12 +15,12 @@ class ArticlesController < Prism::Controller
   end
 end
 
-class RemarksController < Prism::Controller
+class RemarksController < Facet::Controller
   def index = html("remarks-for-article-#{params['article_id']}")
   def show = html("remark-#{params['id']}-on-article-#{params['article_id']}")
 end
 
-class AccountController < Prism::Controller
+class AccountController < Facet::Controller
   def show
     respond_to do |format|
       format.html { html('the-account') }
@@ -31,11 +31,11 @@ class AccountController < Prism::Controller
   def edit = html('edit-the-account')
 end
 
-class PreferencesController < Prism::Controller
+class PreferencesController < Facet::Controller
   def index = html('preferences-for-account')
 end
 
-class NestedResourcesApp < Prism::Application
+class NestedResourcesApp < Facet::Application
   resources :articles do
     member do
       patch :publish
@@ -108,10 +108,6 @@ class ResourcesAdvancedTest < Minitest::Test
     assert_equal 'preferences-for-account', body.join
   end
 
-  # `resource` used to build its routes without `format: true`, unlike
-  # `resources` - a singular resource such as this one could only ever be
-  # reached as JSON through Accept-header negotiation, never through the
-  # explicit ".json" extension every plural resource already supports.
   def test_singular_resource_supports_the_json_extension
     status, headers, body = call('GET', '/account.json')
     assert_equal 200, status
@@ -121,7 +117,7 @@ class ResourcesAdvancedTest < Minitest::Test
 
   def test_member_and_collection_require_an_id_param_and_reject_singular_resources
     error = assert_raises(ArgumentError) do
-      Class.new(Prism::Application) do
+      Class.new(Facet::Application) do
         resource :account do
           member { get :foo }
         end

@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class OrmPessimisticTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-pessimistic')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-pessimistic')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:counters, %w[id value])
 
-    counter_class = Class.new(Prism::Orm::Model) { table_name :counters }
+    counter_class = Class.new(Facet::Orm::Model) { table_name :counters }
     counter_class.store = @store
     Object.const_set(:Counter, counter_class)
   end
@@ -21,13 +21,13 @@ class OrmPessimisticTest < Minitest::Test
 
   def test_lock_bang_raises_on_a_record_that_was_never_saved
     counter = Counter.new(value: 0)
-    assert_raises(Prism::Orm::Pessimistic::UnpersistedRecordError) { counter.lock! }
+    assert_raises(Facet::Orm::Pessimistic::UnpersistedRecordError) { counter.lock! }
   end
 
   def test_lock_bang_raises_on_a_record_with_unsaved_changes
     counter = Counter.create!(value: 0)
     counter.value = 5
-    assert_raises(Prism::Orm::Pessimistic::DirtyRecordError) { counter.lock! }
+    assert_raises(Facet::Orm::Pessimistic::DirtyRecordError) { counter.lock! }
   end
 
   def test_lock_bang_reloads_data_written_by_another_handle_in_the_meantime
@@ -80,16 +80,6 @@ class OrmPessimisticTest < Minitest::Test
     assert_equal 2, Counter.find(counter.id).value
   end
 
-  # Everything below forks real child OS processes sharing nothing but the
-  # PStore file on disk - Store#within_transaction opens a brand new file
-  # handle and takes a real File::LOCK_EX/LOCK_SH on it for every single
-  # transaction (stdlib pstore.rb, not something this codebase controls),
-  # so this is the same cross-process guarantee two independent `prism`
-  # server processes pointed at the same database file would get, not a
-  # simulation of it via threads. `exit!` (not `exit`) is required in every
-  # forked child: minitest/autorun installs an at_exit hook, and a plain
-  # `exit` would let the child fall into that hook and re-run the entire
-  # suite a second time from inside the fork.
   def test_two_processes_updating_without_a_lock_lose_an_update
     skip 'fork not supported on this platform' unless Process.respond_to?(:fork)
 
@@ -97,13 +87,6 @@ class OrmPessimisticTest < Minitest::Test
     a_read, a_wrote_read_signal = IO.pipe
     b_read, b_wrote_read_signal = IO.pipe
 
-    # Two pipes force the full ordering a lost update needs: A reads, THEN
-    # B reads (while the value is still whatever A saw, because A is
-    # blocked waiting on B before it writes anything), THEN both write back
-    # "their own read + 1" as two independent transactions. Only the READS
-    # are ordered here - deliberately NOT the writes, since a real lost
-    # update does not care which write lands last, only that both were
-    # computed from the same stale value.
     pid_a = Process.fork do
       a_read.close
       b_wrote_read_signal.close
@@ -132,10 +115,6 @@ class OrmPessimisticTest < Minitest::Test
     Process.waitpid(pid_a)
     Process.waitpid(pid_b)
 
-    # Both processes read 0 (forced ordering above only sequences the
-    # reads), so both independently write 1 back - the second write just
-    # clobbers the first with the exact same value, silently losing A's
-    # increment no matter which of the two writes lands last.
     assert_equal 1, Counter.find(counter.id).value
   end
 

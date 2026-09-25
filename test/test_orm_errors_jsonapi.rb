@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class OrmErrorsJsonapiTest < Minitest::Test
   def setup
-    @errors = Prism::Orm::Errors.new
+    @errors = Facet::Orm::Errors.new
   end
 
   def test_empty_errors_produce_empty_array

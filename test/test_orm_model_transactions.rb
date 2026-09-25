@@ -1,22 +1,22 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class OrmModelTransactionsTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-model-tx')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-model-tx')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:accounts, %w[id name balance])
     @store.create_table(:authors, %w[id name])
     @store.create_table(:posts, %w[id title author_id])
 
-    account_class = Class.new(Prism::Orm::Model) { table_name :accounts }
-    author_class = Class.new(Prism::Orm::Model) do
+    account_class = Class.new(Facet::Orm::Model) { table_name :accounts }
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :posts, class_name: 'Post', foreign_key: 'author_id', dependent: :destroy
     end
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
@@ -53,7 +53,7 @@ class OrmModelTransactionsTest < Minitest::Test
   def test_rollback_exception_aborts_silently_without_propagating
     result = Account.transaction do
       Account.create!(name: 'alice', balance: 10)
-      raise Prism::Orm::Rollback
+      raise Facet::Orm::Rollback
     end
     assert_nil result
     assert_empty Account.all.to_a
@@ -117,7 +117,7 @@ class OrmModelTransactionsTest < Minitest::Test
   end
 
   def test_cascaded_dependent_destroy_shares_one_transaction_with_the_parent
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     Post.create!(title: 'a', author_id: author.id)
     Post.create!(title: 'b', author_id: author.id)
 
@@ -131,7 +131,7 @@ class OrmModelTransactionsTest < Minitest::Test
 
   def test_before_destroy_abort_never_reaches_the_store
     Author.before_destroy { throw :abort }
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     author.destroy
     refute author.destroyed?
     assert Author.find(author.id)
@@ -169,7 +169,7 @@ class OrmModelTransactionsTest < Minitest::Test
       Account.create!(name: 'alice', balance: 10)
       result = Account.transaction(requires_new: true) do
         Account.create!(name: 'doomed', balance: 999)
-        raise Prism::Orm::Rollback
+        raise Facet::Orm::Rollback
       end
       assert_nil result
       Account.create!(name: 'bob', balance: 20)

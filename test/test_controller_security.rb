@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class NotesController < Prism::Controller
+class NotesController < Facet::Controller
   protect_from_forgery except: [:token]
 
   def self.received_log
@@ -33,7 +33,7 @@ class NotesController < Prism::Controller
   end
 end
 
-class SecureNotesApp < Prism::Application
+class SecureNotesApp < Facet::Application
   enable_sessions(secret: 'notes-secret')
 
   get '/notes/token', to: 'notes#token'
@@ -55,7 +55,7 @@ class ControllerSecurityTest < Minitest::Test
   end
 
   def session_cookie_from(headers)
-    line = headers['Set-Cookie'].split("\n").find { |c| c.start_with?('prism.session=') }
+    line = headers['Set-Cookie'].split("\n").find { |c| c.start_with?('facet.session=') }
     line.split(';').first
   end
 

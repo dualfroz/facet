@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmEnumTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-enum-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-enum-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title status role])
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       enum :status, { draft: 0, published: 1, archived: 2 }
       enum role: { author: 0, editor: 1 }, prefix: true
@@ -87,7 +87,7 @@ class OrmEnumTest < Minitest::Test
 
   def test_duplicate_raw_values_are_rejected_at_declaration
     assert_raises(ArgumentError) do
-      Class.new(Prism::Orm::Model) do
+      Class.new(Facet::Orm::Model) do
         table_name :posts
         enum :status, { draft: 0, published: 0 }
       end

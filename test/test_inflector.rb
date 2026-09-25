@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class InflectorTest < Minitest::Test
-  include Prism::Inflector
+  include Facet::Inflector
 
   def test_underscore
     assert_equal 'posts_controller', underscore('PostsController')

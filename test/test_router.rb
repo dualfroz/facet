@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class RouterTest < Minitest::Test
   def setup
-    @router = Prism::Router.new
+    @router = Facet::Router.new
   end
 
   def test_static_match

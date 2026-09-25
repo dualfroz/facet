@@ -1,11 +1,11 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmIndexStoreTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-index-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:users, %w[id email age])
   end
 
@@ -26,7 +26,7 @@ class OrmIndexStoreTest < Minitest::Test
 
   def test_add_index_twice_with_the_same_name_raises
     @store.add_index(:users, :email)
-    assert_raises(Prism::Orm::Store::IndexExists) { @store.add_index(:users, :email) }
+    assert_raises(Facet::Orm::Store::IndexExists) { @store.add_index(:users, :email) }
   end
 
   def test_add_index_backfills_existing_rows
@@ -42,7 +42,7 @@ class OrmIndexStoreTest < Minitest::Test
     @store.insert(:users, email: 'dup@x.com', age: 20)
     @store.insert(:users, email: 'dup@x.com', age: 30)
 
-    assert_raises(Prism::Orm::Store::UniqueConstraintViolation) do
+    assert_raises(Facet::Orm::Store::UniqueConstraintViolation) do
       @store.add_index(:users, :email, unique: true)
     end
     assert_equal [], @store.indexes(:users)
@@ -61,7 +61,7 @@ class OrmIndexStoreTest < Minitest::Test
   end
 
   def test_remove_unknown_index_raises
-    assert_raises(Prism::Orm::Store::UnknownIndex) { @store.remove_index(:users, :email) }
+    assert_raises(Facet::Orm::Store::UnknownIndex) { @store.remove_index(:users, :email) }
   end
 
   def test_lookup_by_index_returns_nil_without_a_covering_index
@@ -99,7 +99,7 @@ class OrmIndexStoreTest < Minitest::Test
     @store.add_index(:users, :email, unique: true)
     @store.insert(:users, email: 'a@x.com', age: 20)
 
-    assert_raises(Prism::Orm::Store::UniqueConstraintViolation) do
+    assert_raises(Facet::Orm::Store::UniqueConstraintViolation) do
       @store.insert(:users, email: 'a@x.com', age: 30)
     end
     assert_equal 1, @store.count(:users), 'the rejected insert must not have partially applied'
@@ -110,7 +110,7 @@ class OrmIndexStoreTest < Minitest::Test
     id1 = @store.insert(:users, email: 'a@x.com', age: 20)
     id2 = @store.insert(:users, email: 'b@x.com', age: 30)
 
-    assert_raises(Prism::Orm::Store::UniqueConstraintViolation) do
+    assert_raises(Facet::Orm::Store::UniqueConstraintViolation) do
       @store.update(:users, id2, email: 'a@x.com')
     end
     assert_equal 'b@x.com', @store.find(:users, id2)['email'], 'the rejected update must not have partially applied'
@@ -146,15 +146,10 @@ class OrmIndexStoreTest < Minitest::Test
   end
 end
 
-# add_column/remove_column must keep any index that covers the affected
-# column in sync - see the comments on Store#add_column/#remove_column for
-# why a stale map here is a silent-wrong-results bug (Relation#rows trusts
-# a non-nil #lookup_by_index result as definitive), not just a missed
-# optimization.
 class OrmIndexColumnMigrationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-column-migration')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-index-column-migration')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
   end
 
@@ -241,8 +236,8 @@ end
 
 class OrmIndexRangeStoreTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-range-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-index-range-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:users, %w[id email age])
   end
 
@@ -347,15 +342,10 @@ class OrmIndexRangeStoreTest < Minitest::Test
   end
 end
 
-# Covers Store#lookup_by_index_in - the IN-list lookup backing
-# `where(column: [v1, v2, ...])`, most importantly `where(id: [...])`,
-# which every belongs_to/has_one/has_many/has_many-through eager-load
-# batches its preload query through (see Relation#preload_belongs_to and
-# friends).
 class OrmIndexInListStoreTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-in-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-index-in-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:users, %w[id email age])
   end
 
@@ -428,11 +418,7 @@ class OrmIndexInListStoreTest < Minitest::Test
   end
 end
 
-# Counts full-table scans (Store#all) separately from index lookups
-# (Store#lookup_by_index that actually found a covering index), the same
-# shape as CountingStore/CountingThroughStore used by the eager-loading
-# tests, so Relation's index usage can be proven rather than assumed.
-class CountingIndexStore < Prism::Orm::Store
+class CountingIndexStore < Facet::Orm::Store
   attr_reader :scan_count
 
   attr_reader :range_hits
@@ -494,12 +480,12 @@ end
 
 class OrmIndexRelationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-relation')
+    @dir = Dir.mktmpdir('facet-index-relation')
     @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title status])
     @store.add_index(:posts, :status)
 
-    post_class = Class.new(Prism::Orm::Model) { table_name :posts }
+    post_class = Class.new(Facet::Orm::Model) { table_name :posts }
     post_class.store = @store
     Object.const_set(:IndexedPost, post_class)
 
@@ -564,20 +550,12 @@ class OrmIndexRelationTest < Minitest::Test
     @store.add_index(:posts, :title)
     @store.reset_counts!
 
-    # post "a" is status draft AND title "a" - both branches of the Or match
-    # the same row, so the union must not return it twice.
     results = IndexedPost.where(status: 'draft').or(IndexedPost.where(title: 'a')).to_a
     assert_equal ['a', 'c'], results.map { |post| post['title'] }.sort
     assert_equal 2, results.size
     assert_equal 0, @store.scan_count
   end
 
-  # `a.or(b).or(c)` builds OrNode(OrNode(a, b), c) - a left-nested tree, not
-  # a flat three-way union. OrNode#indexed_candidates only recurses into
-  # @left/@right, so this exercises that the recursion actually reaches the
-  # innermost branch rather than treating the outer node's @left (itself an
-  # OrNode) as an opaque leaf. Left untested since the index-union Or was
-  # first added, per prism-postep.md "kierunki dalsze".
   def test_three_way_or_uses_the_index_on_every_branch
     @store.add_index(:posts, :title)
     IndexedPost.create!(title: 'd', status: 'published')
@@ -595,9 +573,6 @@ class OrmIndexRelationTest < Minitest::Test
   def test_three_way_or_falls_back_to_a_scan_when_one_branch_is_unindexed
     @store.reset_counts!
 
-    # title carries no index in this test (unlike the one above), so the
-    # whole union must scan rather than silently dropping that branch's
-    # matches while still answering the other two from their indexes.
     results = IndexedPost.where(status: 'draft')
                           .or(IndexedPost.where(title: 'b'))
                           .or(IndexedPost.where(status: 'archived'))
@@ -609,12 +584,12 @@ end
 
 class OrmIndexRangeRelationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-range-relation')
+    @dir = Dir.mktmpdir('facet-index-range-relation')
     @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:products, %w[id name price])
     @store.add_index(:products, :price)
 
-    product_class = Class.new(Prism::Orm::Model) { table_name :products }
+    product_class = Class.new(Facet::Orm::Model) { table_name :products }
     product_class.store = @store
     Object.const_set(:RangeIndexedProduct, product_class)
 
@@ -680,22 +655,18 @@ class OrmIndexRangeRelationTest < Minitest::Test
     results = RangeIndexedProduct.where(price: { gte: 30 }).or(RangeIndexedProduct.where(name: 'cheap')).to_a
     assert_equal %w[cheap luxury], results.map { |p| p['name'] }.sort
     assert_equal 1, @store.scan_count, 'name has no index, so OrNode cannot union candidates from both sides'
-    # The price side IS individually range-indexed, and OrNode#indexed_candidates
-    # tries it before discovering the name side has no covering index at all -
-    # that one probe is cheap (an O(log n) index lookup, not a scan) and its
-    # result is simply discarded once the other side comes back nil.
     assert_equal 1, @store.range_hits
   end
 end
 
 class OrmIndexInListRelationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-in-relation')
+    @dir = Dir.mktmpdir('facet-index-in-relation')
     @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id sku status])
     @store.add_index(:widgets, :sku)
 
-    widget_class = Class.new(Prism::Orm::Model) { table_name :widgets }
+    widget_class = Class.new(Facet::Orm::Model) { table_name :widgets }
     widget_class.store = @store
     Object.const_set(:InListWidget, widget_class)
 
@@ -756,8 +727,8 @@ end
 
 class OrmIndexEqualityRangeStoreTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-eq-range-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-index-eq-range-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id featured position])
   end
 
@@ -788,7 +759,7 @@ class OrmIndexEqualityRangeStoreTest < Minitest::Test
   end
 
   def test_equality_key_order_from_the_caller_does_not_matter
-    wide = Prism::Orm::Store.new(File.join(@dir, 'order.pstore'))
+    wide = Facet::Orm::Store.new(File.join(@dir, 'order.pstore'))
     wide.create_table(:tasks, %w[id project priority position])
     wide.add_index(:tasks, %i[project priority position])
     wide.insert(:tasks, project: 'a', priority: 'high', position: 1)
@@ -844,7 +815,7 @@ class OrmIndexEqualityRangeStoreTest < Minitest::Test
   end
 
   def test_a_three_column_composite_index_still_works_with_a_two_column_prefix
-    @store = Prism::Orm::Store.new(File.join(@dir, 'wide.pstore'))
+    @store = Facet::Orm::Store.new(File.join(@dir, 'wide.pstore'))
     @store.create_table(:tasks, %w[id project priority position])
     @store.add_index(:tasks, %i[project priority position])
     @store.insert(:tasks, project: 'a', priority: 'high', position: 1)
@@ -861,14 +832,6 @@ class OrmIndexEqualityRangeStoreTest < Minitest::Test
     assert_nil @store.lookup_by_index_range(:posts, :position, gte: 0)
   end
 
-  # A paranoid model's Model.all already carries `where(deleted_at: nil)`
-  # before any caller-added `.where(featured: ...)` - real regression this
-  # session's blog_demo.rb run caught: the index prefix is only `featured`,
-  # so `equalities` legitimately arrives with an EXTRA column
-  # (`deleted_at`) the index knows nothing about. That must still resolve
-  # through the index (using only the subset it actually covers), not fall
-  # back to a scan just because the caller happened to also constrain an
-  # unrelated column.
   def test_an_equality_column_outside_the_index_prefix_does_not_block_the_lookup
     @store.add_index(:posts, %i[featured position])
     @store.insert(:posts, featured: true, position: 1, deleted_at: nil)
@@ -880,7 +843,7 @@ class OrmIndexEqualityRangeStoreTest < Minitest::Test
   end
 
   def test_the_most_specific_covering_composite_index_wins_when_several_could_answer
-    wide = Prism::Orm::Store.new(File.join(@dir, 'multi.pstore'))
+    wide = Facet::Orm::Store.new(File.join(@dir, 'multi.pstore'))
     wide.create_table(:tasks, %w[id project priority position])
     wide.add_index(:tasks, %i[project position])
     wide.add_index(:tasks, %i[project priority position])
@@ -895,12 +858,12 @@ end
 
 class OrmIndexEqualityRangeRelationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-index-eq-range-relation')
+    @dir = Dir.mktmpdir('facet-index-eq-range-relation')
     @store = CountingIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id featured position])
     @store.add_index(:posts, %i[featured position])
 
-    post_class = Class.new(Prism::Orm::Model) { table_name :posts }
+    post_class = Class.new(Facet::Orm::Model) { table_name :posts }
     post_class.store = @store
     Object.const_set(:EqRangeIndexedPost, post_class)
 
@@ -947,11 +910,6 @@ class OrmIndexEqualityRangeRelationTest < Minitest::Test
   end
 
   def test_range_without_any_equality_falls_back_to_a_scan_not_the_composite_index
-    # This fixture only has the composite [featured, position] index, no
-    # standalone index on position - a bare range with no equality column
-    # to pair with can use neither the plain range path (single-column
-    # only) nor the composite one (needs an equality prefix), so a scan is
-    # the correct, honest answer here, not a false "it found an index".
     @store.reset_counts!
     results = EqRangeIndexedPost.where(position: { gte: 3 }).to_a
     assert_equal [3], results.map { |p| p['position'] }
@@ -960,11 +918,6 @@ class OrmIndexEqualityRangeRelationTest < Minitest::Test
   end
 
   def test_equality_without_any_range_falls_back_to_a_scan_not_the_composite_index
-    # Same reasoning as above, mirrored: this fixture has no standalone
-    # index on featured either, only the composite - a bare equality with
-    # no range column to pair with can't use a composite index that
-    # requires ALL its columns pinned (see Store#lookup_by_index), so this
-    # is a scan too, not a spurious composite hit.
     @store.reset_counts!
     results = EqRangeIndexedPost.where(featured: true).to_a
     assert_equal 3, results.size

@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmDirtyTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-dirty-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-dirty-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name notes])
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
     end
     widget_class.store = @store
@@ -102,7 +102,7 @@ class OrmDirtyTest < Minitest::Test
 
   def test_before_save_callback_can_inspect_pending_changes
     seen = []
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       before_save { seen << attribute_changed?(:name) }
     end
@@ -115,7 +115,7 @@ class OrmDirtyTest < Minitest::Test
 
   def test_touching_updated_at_column_is_itself_tracked_as_a_change
     @store.create_table(:stamped, %w[id name updated_at])
-    stamped_class = Class.new(Prism::Orm::Model) { table_name :stamped }
+    stamped_class = Class.new(Facet::Orm::Model) { table_name :stamped }
     stamped_class.store = @store
     record = stamped_class.create!(name: 'a')
     assert record.saved_change_to_attribute?('updated_at')

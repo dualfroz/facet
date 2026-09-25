@@ -1,11 +1,11 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 class RescueFromMissingRecordError < StandardError; end
 class RescueFromSpecificError < RescueFromMissingRecordError; end
 
-class RescueFromBaseController < Prism::Controller
+class RescueFromBaseController < Facet::Controller
   rescue_from StandardError, with: :handle_any_error
 
   private
@@ -15,9 +15,6 @@ class RescueFromBaseController < Prism::Controller
   end
 end
 
-# Declares a MORE specific handler than its superclass's catch-all - proves
-# subclass handlers win even though the superclass's StandardError handler
-# would also match.
 class RescueFromController < RescueFromBaseController
   rescue_from RescueFromMissingRecordError, with: :handle_missing_record
   rescue_from ArgumentError do |exception|
@@ -57,7 +54,7 @@ class RescueFromController < RescueFromBaseController
   end
 end
 
-class RescueFromApp < Prism::Application
+class RescueFromApp < Facet::Application
   get '/missing', to: 'rescue_from#boom_missing'
   get '/missing_subclass', to: 'rescue_from#boom_specific_subclass'
   get '/argument', to: 'rescue_from#boom_argument'

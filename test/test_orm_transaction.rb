@@ -1,11 +1,11 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmTransactionTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-tx-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-tx-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:ledger, %w[id amount])
   end
 

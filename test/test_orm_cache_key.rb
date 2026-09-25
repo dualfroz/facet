@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmCacheKeyTest < Minitest::Test
   def setup
     Object.send(:remove_const, :Snippet) if Object.const_defined?(:Snippet)
-    @dir = Dir.mktmpdir('prism-cache-key-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-cache-key-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:snippets, %w[id body created_at updated_at])
 
-    snippet_class = Class.new(Prism::Orm::Model) { table_name :snippets }
+    snippet_class = Class.new(Facet::Orm::Model) { table_name :snippets }
     snippet_class.store = @store
     Object.const_set(:Snippet, snippet_class)
   end
@@ -35,7 +35,7 @@ class OrmCacheKeyTest < Minitest::Test
   def test_cache_key_without_timestamps_falls_back_to_table_and_id
     Object.send(:remove_const, :Snippet)
     @store.create_table(:plain_snippets, %w[id body])
-    plain_class = Class.new(Prism::Orm::Model) { table_name :plain_snippets }
+    plain_class = Class.new(Facet::Orm::Model) { table_name :plain_snippets }
     plain_class.store = @store
     Object.const_set(:Snippet, plain_class)
 

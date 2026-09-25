@@ -1,25 +1,25 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmDependentDestroyTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-dependent-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-dependent-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:authors, %w[id name])
     @store.create_table(:posts, %w[id title author_id])
     @store.create_table(:profiles, %w[id author_id bio])
 
-    author_class = Class.new(Prism::Orm::Model) do
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :posts, class_name: 'Post', foreign_key: 'author_id', dependent: :destroy
       has_one :profile, class_name: 'Profile', foreign_key: 'author_id', dependent: :nullify
     end
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
-    profile_class = Class.new(Prism::Orm::Model) do
+    profile_class = Class.new(Facet::Orm::Model) do
       table_name :profiles
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
@@ -35,18 +35,18 @@ class OrmDependentDestroyTest < Minitest::Test
   end
 
   def test_dependent_destroy_removes_has_many_children
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     p1 = Post.create!(title: 'a', author_id: author.id)
     p2 = Post.create!(title: 'b', author_id: author.id)
 
     author.destroy
 
-    assert_raises(Prism::Orm::RecordNotFound) { Post.find(p1.id) }
-    assert_raises(Prism::Orm::RecordNotFound) { Post.find(p2.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { Post.find(p1.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { Post.find(p2.id) }
   end
 
   def test_dependent_nullify_clears_foreign_key_on_has_one
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     profile = Profile.create!(bio: 'hello', author_id: author.id)
 
     author.destroy
@@ -62,7 +62,7 @@ class OrmDependentDestroyTest < Minitest::Test
 
   def test_unsupported_dependent_option_raises_at_declaration_time
     assert_raises(ArgumentError) do
-      Class.new(Prism::Orm::Model) do
+      Class.new(Facet::Orm::Model) do
         table_name :posts
         has_many :whatever, class_name: 'Post', foreign_key: 'author_id', dependent: :delete_all
       end

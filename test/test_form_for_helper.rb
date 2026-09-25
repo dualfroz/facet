@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class FormForHelperTest < Minitest::Test
   FakeModel = Struct.new(:id, :title) do
@@ -11,7 +11,7 @@ class FormForHelperTest < Minitest::Test
   HelpersWithCsrf = Struct.new(:csrf_token)
 
   def render(source, helpers = nil)
-    Prism::Template.render(source, {}, nil, helpers)
+    Facet::Template.render(source, {}, nil, helpers)
   end
 
   def test_form_for_new_record_uses_post

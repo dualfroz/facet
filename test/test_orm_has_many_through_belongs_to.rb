@@ -1,24 +1,19 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# Covers has_many :through where the through step is a belongs_to (the
-# owner holds the foreign key, so many owners can share one through
-# record) rather than a has_many/has_one (owner.id looked up by foreign
-# key on the through table). Both the lazy reader and the includes()
-# eager-load path need to handle this shape.
 class OrmHasManyThroughBelongsToTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-through-belongs-to-store')
+    @dir = Dir.mktmpdir('facet-through-belongs-to-store')
     @store = CountingBelongsToThroughStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
     @store.create_table(:comments, %w[id post_id body])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id', dependent: :destroy
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id'
       has_many :co_comments, through: :post, source: :comments
@@ -79,22 +74,12 @@ class OrmHasManyThroughBelongsToTest < Minitest::Test
 
     @store.reset_query_count!
     comments = Comment.all.includes(:co_comments).to_a
-    # one query to load comments, one to batch-load its source comments by
-    # post_id (no index on that column here, so still a real #all scan).
-    # Batch-loading the (single, shared) through post by id is NOT a third
-    # counted query: Store#lookup_by_index_in treats the primary key as
-    # always indexed (#rows is already a Hash keyed by id) and this
-    # counting store only wraps #all/#find, not the index lookup methods -
-    # see Store#lookup_by_index_in.
     assert_equal 2, @store.query_count
     assert_equal [2, 2], comments.map { |comment| comment.co_comments.size }
   end
 end
 
-# Wraps Store#all/#find to count reads, mirroring
-# test_orm_has_many_through.rb's CountingThroughStore so this file has no
-# load-order dependency on it.
-class CountingBelongsToThroughStore < Prism::Orm::Store
+class CountingBelongsToThroughStore < Facet::Orm::Store
   def initialize(*)
     super
     @query_count = 0

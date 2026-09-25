@@ -1,17 +1,17 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class ViewTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-view')
+    @dir = Dir.mktmpdir('facet-view')
     FileUtils.mkdir_p(File.join(@dir, 'posts'))
     FileUtils.mkdir_p(File.join(@dir, 'layouts'))
     File.write(File.join(@dir, 'posts', 'index.erb'), '<%= greeting %>')
     File.write(File.join(@dir, 'posts', '_item.erb'), '[<%= label %>]')
     File.write(File.join(@dir, 'layouts', 'application.erb'), 'before-<%== content %>-after')
-    @view = Prism::View.new(@dir)
+    @view = Facet::View.new(@dir)
   end
 
   def teardown
@@ -49,17 +49,17 @@ class ViewTest < Minitest::Test
   end
 
   def test_missing_template_raises_a_descriptive_error
-    error = assert_raises(Prism::View::TemplateNotFound) { @view.render('posts/missing') }
+    error = assert_raises(Facet::View::TemplateNotFound) { @view.render('posts/missing') }
     assert_includes error.message, 'posts/missing'
   end
 
   def test_render_emits_a_render_template_event_per_template_file
     events = []
-    subscriber = Prism::Instrumentation.subscribe('render_template.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('render_template.facet') { |event| events << event }
     begin
       @view.render('posts/index', locals: { greeting: 'hi' }, layout: :application)
     ensure
-      Prism::Instrumentation.unsubscribe(subscriber)
+      Facet::Instrumentation.unsubscribe(subscriber)
     end
 
     assert_equal %w[posts/index layouts/application], events.map { |e| e.payload[:identifier] }

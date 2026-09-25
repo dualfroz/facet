@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class RateLimiterPStoreStoreTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-rate-limiter')
+    @dir = Dir.mktmpdir('facet-rate-limiter')
     @path = File.join(@dir, 'nested', 'rate_limits.pstore')
-    @store = Prism::RateLimiter::PStoreStore.new(@path)
+    @store = Facet::RateLimiter::PStoreStore.new(@path)
   end
 
   def teardown
@@ -41,7 +41,7 @@ class RateLimiterPStoreStoreTest < Minitest::Test
     @store.count('ip:1', 60)
     @store.ban!('ip:2', 60)
 
-    reopened = Prism::RateLimiter::PStoreStore.new(@path)
+    reopened = Facet::RateLimiter::PStoreStore.new(@path)
     assert_equal 3, reopened.count('ip:1', 60)
     assert reopened.banned?('ip:2')
   end
@@ -54,12 +54,6 @@ class RateLimiterPStoreStoreTest < Minitest::Test
     refute @store.banned?('ip:2')
   end
 
-  # Real cross-process race: #count reads the current window, bumps it, and
-  # writes it back inside a single PStore#transaction, which flocks the file
-  # for the duration. If that were split into separate read/write steps (the
-  # exact bug found and fixed in Jobs::Queue#claim_next! two sessions ago),
-  # several OS processes hammering the same key would stomp on each other's
-  # increments and the final count would fall short of the true total.
   def test_count_is_safe_across_real_concurrent_processes
     store_path = File.join(@dir, 'shared.pstore')
     process_count = 4
@@ -67,8 +61,8 @@ class RateLimiterPStoreStoreTest < Minitest::Test
 
     counter_script = File.join(@dir, 'counter.rb')
     File.write(counter_script, <<~RUBY)
-      require 'prism'
-      store = Prism::RateLimiter::PStoreStore.new(#{store_path.inspect})
+      require 'facet'
+      store = Facet::RateLimiter::PStoreStore.new(#{store_path.inspect})
       results = Array.new(#{increments_per_process}) { store.count('shared-key', 3600) }
       File.write(File.join(#{@dir.inspect}, "\#{Process.pid}.result"), results.join(','))
     RUBY
@@ -90,7 +84,7 @@ class RateLimiterPStoreStoreTest < Minitest::Test
                  'every value from 1..total should appear exactly once - a lost update would ' \
                  'produce a duplicate and leave a gap'
 
-    final_store = Prism::RateLimiter::PStoreStore.new(store_path)
+    final_store = Facet::RateLimiter::PStoreStore.new(store_path)
     assert_equal expected_total + 1, final_store.count('shared-key', 3600)
   end
 end

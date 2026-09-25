@@ -1,22 +1,22 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 class MiddlewareRateLimitingTest < Minitest::Test
   include TestSupport
 
   def setup
-    Prism::RateLimiter.reset!
+    Facet::RateLimiter.reset!
     @downstream_calls = 0
     downstream = lambda do |_env|
       @downstream_calls += 1
       [200, {}, ['ok']]
     end
-    @app = Prism::Middleware::RateLimiting.new(downstream)
+    @app = Facet::Middleware::RateLimiting.new(downstream)
   end
 
   def teardown
-    Prism::RateLimiter.reset!
+    Facet::RateLimiter.reset!
   end
 
   def request(ip: '1.1.1.1', path: '/login')
@@ -26,7 +26,7 @@ class MiddlewareRateLimitingTest < Minitest::Test
   end
 
   def test_requests_under_the_limit_pass_through
-    Prism::RateLimiter.throttle('logins/ip', limit: 2, period: 60) { |req| req.env['REMOTE_ADDR'] }
+    Facet::RateLimiter.throttle('logins/ip', limit: 2, period: 60) { |req| req.env['REMOTE_ADDR'] }
 
     2.times do
       status, = request
@@ -36,7 +36,7 @@ class MiddlewareRateLimitingTest < Minitest::Test
   end
 
   def test_request_over_the_limit_is_throttled_with_retry_after
-    Prism::RateLimiter.throttle('logins/ip', limit: 2, period: 60) { |req| req.env['REMOTE_ADDR'] }
+    Facet::RateLimiter.throttle('logins/ip', limit: 2, period: 60) { |req| req.env['REMOTE_ADDR'] }
 
     2.times { request }
     status, headers, body = request
@@ -48,7 +48,7 @@ class MiddlewareRateLimitingTest < Minitest::Test
   end
 
   def test_throttle_keys_are_independent_per_discriminator_value
-    Prism::RateLimiter.throttle('logins/ip', limit: 1, period: 60) { |req| req.env['REMOTE_ADDR'] }
+    Facet::RateLimiter.throttle('logins/ip', limit: 1, period: 60) { |req| req.env['REMOTE_ADDR'] }
 
     assert_equal 200, request(ip: '1.1.1.1').first
     assert_equal 200, request(ip: '2.2.2.2').first
@@ -56,13 +56,13 @@ class MiddlewareRateLimitingTest < Minitest::Test
   end
 
   def test_discriminator_returning_nil_skips_the_rule
-    Prism::RateLimiter.throttle('logins/ip', limit: 1, period: 60) { |_req| nil }
+    Facet::RateLimiter.throttle('logins/ip', limit: 1, period: 60) { |_req| nil }
 
     5.times { assert_equal 200, request.first }
   end
 
   def test_blocklisted_request_is_rejected_with_403_before_reaching_app
-    Prism::RateLimiter.blocklist('scanners') { |req| req.path == '/etc/passwd' }
+    Facet::RateLimiter.blocklist('scanners') { |req| req.path == '/etc/passwd' }
 
     status, = request(path: '/etc/passwd')
     assert_equal 403, status
@@ -70,8 +70,8 @@ class MiddlewareRateLimitingTest < Minitest::Test
   end
 
   def test_safelist_bypasses_an_otherwise_matching_blocklist
-    Prism::RateLimiter.blocklist('scanners') { |_req| true }
-    Prism::RateLimiter.safelist('trusted') { |req| req.env['REMOTE_ADDR'] == '9.9.9.9' }
+    Facet::RateLimiter.blocklist('scanners') { |_req| true }
+    Facet::RateLimiter.safelist('trusted') { |req| req.env['REMOTE_ADDR'] == '9.9.9.9' }
 
     assert_equal 200, request(ip: '9.9.9.9').first
     assert_equal 403, request(ip: '1.1.1.1').first
@@ -79,16 +79,16 @@ class MiddlewareRateLimitingTest < Minitest::Test
 
   def test_track_rule_observes_but_never_blocks
     tracked = []
-    Prism::RateLimiter.track('all-logins') { |req| req.env['REMOTE_ADDR'] }
-    Prism::RateLimiter.on_notify { |type, name, _req, payload| tracked << [type, name, payload] }
+    Facet::RateLimiter.track('all-logins') { |req| req.env['REMOTE_ADDR'] }
+    Facet::RateLimiter.on_notify { |type, name, _req, payload| tracked << [type, name, payload] }
 
     assert_equal 200, request(ip: '3.3.3.3').first
     assert_equal [[:track, 'all-logins', '3.3.3.3']], tracked
   end
 
   def test_fail2ban_style_blocklist_bans_after_repeated_offenses
-    Prism::RateLimiter.blocklist('fail2ban pentesters') do |req|
-      Prism::RateLimiter.fail2ban_filter(req.env['REMOTE_ADDR'], maxretry: 2, findtime: 60, bantime: 300) do
+    Facet::RateLimiter.blocklist('fail2ban pentesters') do |req|
+      Facet::RateLimiter.fail2ban_filter(req.env['REMOTE_ADDR'], maxretry: 2, findtime: 60, bantime: 300) do
         req.path.include?('/etc/passwd')
       end
     end

@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class ContentForTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-content-for')
+    @dir = Dir.mktmpdir('facet-content-for')
     FileUtils.mkdir_p(File.join(@dir, 'pages'))
     FileUtils.mkdir_p(File.join(@dir, 'layouts'))
-    @view = Prism::View.new(@dir)
+    @view = Facet::View.new(@dir)
   end
 
   def teardown

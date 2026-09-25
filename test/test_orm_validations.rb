@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmValidationsTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-validation-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-validation-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:accounts, %w[id email nickname])
-    account_class = Class.new(Prism::Orm::Model) do
+    account_class = Class.new(Facet::Orm::Model) do
       table_name :accounts
       validates :email, presence: true, uniqueness: true, format: { with: /\A[^@\s]+@[^@\s]+\z/ }
       validates :nickname, length: { minimum: 2, maximum: 10 }
@@ -28,13 +28,13 @@ class OrmValidationsTest < Minitest::Test
   end
 
   def test_format_validation_rejects_bad_email
-    account = Account.new(email: 'not-an-email', nickname: 'foksiu')
+    account = Account.new(email: 'not-an-email', nickname: 'alice')
     refute account.valid?
     assert_includes account.errors[:email], 'is invalid'
   end
 
   def test_valid_record_has_no_errors
-    account = Account.new(email: 'foksiu@example.com', nickname: 'foksiu')
+    account = Account.new(email: 'alice@example.com', nickname: 'alice')
     assert account.valid?
     assert_empty account.errors
   end
@@ -60,7 +60,7 @@ class OrmValidationsTest < Minitest::Test
 
   def test_custom_message
     Account.validates(:email, format: { with: /@/, message: 'needs an @ sign' })
-    account = Account.new(email: 'nope', nickname: 'foksiu')
+    account = Account.new(email: 'nope', nickname: 'alice')
     refute account.valid?
     assert_includes account.errors[:email], 'needs an @ sign'
   ensure

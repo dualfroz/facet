@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmQueryAggregationsTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-query-aggregations')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-query-aggregations')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:orders, %w[id customer amount])
-    order_class = Class.new(Prism::Orm::Model) do
+    order_class = Class.new(Facet::Orm::Model) do
       table_name :orders
     end
     order_class.store = @store

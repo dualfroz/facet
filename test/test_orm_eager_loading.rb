@@ -1,25 +1,25 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmEagerLoadingTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-eager-store')
+    @dir = Dir.mktmpdir('facet-eager-store')
     @store = CountingStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:authors, %w[id name])
     @store.create_table(:posts, %w[id title author_id])
     @store.create_table(:bios, %w[id author_id headline])
 
-    author_class = Class.new(Prism::Orm::Model) do
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :posts, class_name: 'Post', foreign_key: 'author_id'
       has_one :bio, class_name: 'Bio', foreign_key: 'author_id'
     end
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
-    bio_class = Class.new(Prism::Orm::Model) do
+    bio_class = Class.new(Facet::Orm::Model) do
       table_name :bios
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
@@ -93,15 +93,13 @@ class OrmEagerLoadingTest < Minitest::Test
     Author.all.includes(:posts).to_a.each { |author| author.posts.to_a }
     eager_queries = @store.query_count
 
-    assert_equal 4, lazy_queries # 1 authors query + 1 posts query per author (N+1)
-    assert_equal 2, eager_queries # 1 authors query + 1 batched posts query
+    assert_equal 4, lazy_queries
+    assert_equal 2, eager_queries
     assert_operator eager_queries, :<, lazy_queries
   end
 end
 
-# Wraps Store#all/#find to count reads, so tests can assert on actual
-# query volume instead of trusting behavior "looks" batched.
-class CountingStore < Prism::Orm::Store
+class CountingStore < Facet::Orm::Store
   def initialize(*)
     super
     @query_count = 0

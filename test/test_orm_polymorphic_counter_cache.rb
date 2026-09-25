@@ -1,32 +1,32 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmPolymorphicCounterCacheTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-polymorphic-counter-cache-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-polymorphic-counter-cache-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title likes_count])
     @store.create_table(:photos, %w[id caption likes_count])
     @store.create_table(:likes, %w[id likeable_id likeable_type user_id deleted_at])
     @store.create_table(:reactions, %w[id reactable_id reactable_type score])
     @store.create_table(:posts_with_tally, %w[id title reactions_tally])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
     end
-    photo_class = Class.new(Prism::Orm::Model) do
+    photo_class = Class.new(Facet::Orm::Model) do
       table_name :photos
     end
-    like_class = Class.new(Prism::Orm::Model) do
+    like_class = Class.new(Facet::Orm::Model) do
       table_name :likes
       acts_as_paranoid
       belongs_to :likeable, polymorphic: true, counter_cache: true
     end
-    tally_post_class = Class.new(Prism::Orm::Model) do
+    tally_post_class = Class.new(Facet::Orm::Model) do
       table_name :posts_with_tally
     end
-    reaction_class = Class.new(Prism::Orm::Model) do
+    reaction_class = Class.new(Facet::Orm::Model) do
       table_name :reactions
       belongs_to :reactable, polymorphic: true, counter_cache: :reactions_tally
     end

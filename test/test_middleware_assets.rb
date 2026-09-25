@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 require 'tmpdir'
 require 'fileutils'
@@ -8,13 +8,13 @@ class MiddlewareAssetsTest < Minitest::Test
   include TestSupport
 
   def setup
-    @dir = Dir.mktmpdir('prism-assets-mw')
+    @dir = Dir.mktmpdir('facet-assets-mw')
     @downstream_calls = 0
     downstream = lambda do |_env|
       @downstream_calls += 1
       [404, {}, ['not found downstream']]
     end
-    @app = Prism::Middleware::Assets.new(downstream, root: @dir)
+    @app = Facet::Middleware::Assets.new(downstream, root: @dir)
   end
 
   def teardown
@@ -72,7 +72,7 @@ class MiddlewareAssetsTest < Minitest::Test
   end
 
   def test_custom_prefix
-    app = Prism::Middleware::Assets.new(->(_env) { [404, {}, []] }, root: @dir, prefix: '/static')
+    app = Facet::Middleware::Assets.new(->(_env) { [404, {}, []] }, root: @dir, prefix: '/static')
     write_fingerprinted('app-11111111.js', 'console.log(1)')
 
     status, = app.call(env_for('GET', '/static/app-11111111.js'))

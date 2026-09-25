@@ -1,26 +1,19 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# `has_many`'s generated reader (Associable#has_many, no `through:`/`as:`) builds
-# `Target.where(foreign_key => id)` directly - a single HashNode equality - so it
-# is answerable by Store#lookup_by_index exactly like any other `where(column: value)`
-# once the foreign key column carries an index. Before this index exists, every call
-# to `parent.children` full-scans the child table, even though it is one of the most
-# frequently issued queries in any has_many-shaped app (examples/blog's `post.comments`
-# runs on every single post page load).
 class OrmHasManyForeignKeyIndexTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-fk-index-store')
+    @dir = Dir.mktmpdir('facet-fk-index-store')
     @store = CountingFkIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:parents, %w[id name])
     @store.create_table(:children, %w[id parent_id label])
 
-    parent_class = Class.new(Prism::Orm::Model) do
+    parent_class = Class.new(Facet::Orm::Model) do
       table_name :parents
       has_many :children, class_name: 'Child', foreign_key: 'parent_id'
     end
-    child_class = Class.new(Prism::Orm::Model) { table_name :children }
+    child_class = Class.new(Facet::Orm::Model) { table_name :children }
     [parent_class, child_class].each { |klass| klass.store = @store }
     Object.const_set(:FkParent, parent_class)
     Object.const_set(:Child, child_class)
@@ -71,30 +64,23 @@ class OrmHasManyForeignKeyIndexTest < Minitest::Test
   end
 end
 
-# `has_many ..., as: :taggable` (Associable#define_has_many_polymorphic) builds a
-# two-column HashNode equality (`likeable_id` + `likeable_type` in examples/blog's
-# `Like`). Store#lookup_by_index only requires an index's own columns to be present
-# in the equalities (Relation#rows always re-applies the full @condition afterward),
-# so a single-column index on just `likeable_id` is already enough to skip the table
-# scan - the leftover `likeable_type` equality is filtered from the (small) candidate
-# set in memory instead of against the whole table. Both shapes are proven below.
 class OrmHasManyPolymorphicForeignKeyIndexTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-fk-poly-index-store')
+    @dir = Dir.mktmpdir('facet-fk-poly-index-store')
     @store = CountingFkIndexStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
     @store.create_table(:comments, %w[id body])
     @store.create_table(:tags, %w[id taggable_id taggable_type label])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :tags, class_name: 'Tag', as: :taggable
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       has_many :tags, class_name: 'Tag', as: :taggable
     end
-    tag_class = Class.new(Prism::Orm::Model) { table_name :tags }
+    tag_class = Class.new(Facet::Orm::Model) { table_name :tags }
     [post_class, comment_class, tag_class].each { |klass| klass.store = @store }
     Object.const_set(:TaggablePost, post_class)
     Object.const_set(:TaggableComment, comment_class)
@@ -144,11 +130,7 @@ class OrmHasManyPolymorphicForeignKeyIndexTest < Minitest::Test
   end
 end
 
-# Wraps Store#all/#lookup_by_index so tests can assert on whether a query hit
-# the index or fell back to a full table scan, instead of trusting that it
-# "looks" indexed. Relation#rows only calls #all when indexed_candidates comes
-# back nil, so #all's call count is exactly the full-scan count.
-class CountingFkIndexStore < Prism::Orm::Store
+class CountingFkIndexStore < Facet::Orm::Store
   attr_reader :scan_count, :index_hits
 
   def initialize(*args)

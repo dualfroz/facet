@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'support'
 
-class RenderErrorsGadget < Prism::Orm::Model
+class RenderErrorsGadget < Facet::Orm::Model
   table_name :gadgets
   validates :name, presence: true, length: { minimum: 3 }
 end
 
-class GadgetsController < Prism::Controller
+class GadgetsController < Facet::Controller
   def create
     gadget = RenderErrorsGadget.new(name: params['name'])
 
@@ -28,14 +28,14 @@ class GadgetsController < Prism::Controller
     respond_to do |format|
       format.json { json(id: gadget.id, name: gadget.name) }
     end
-  rescue Prism::Orm::RecordNotFound
+  rescue Facet::Orm::RecordNotFound
     respond_to do |format|
       format.json { render_not_found('gadget not found') }
     end
   end
 end
 
-class GadgetsApp < Prism::Application
+class GadgetsApp < Facet::Application
   post '/gadgets', to: 'gadgets#create'
   get '/gadgets/:id', to: 'gadgets#show'
 end
@@ -44,8 +44,8 @@ class RenderErrorsTest < Minitest::Test
   include TestSupport
 
   def setup
-    @dir = Dir.mktmpdir('prism-render-errors-store')
-    store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-render-errors-store')
+    store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     store.create_table(:gadgets, %w[id name])
     RenderErrorsGadget.store = store
   end

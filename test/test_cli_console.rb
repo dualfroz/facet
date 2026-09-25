@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 
 class CliConsoleTest < Minitest::Test
   def setup
-    @workdir = Dir.mktmpdir('prism-cli-console')
-    @cli = Prism::Cli.new(@workdir)
+    @workdir = Dir.mktmpdir('facet-cli-console')
+    @cli = Facet::Cli.new(@workdir)
   end
 
   def teardown
@@ -28,7 +28,7 @@ class CliConsoleTest < Minitest::Test
 
   def test_prints_prompt_before_each_line_and_at_the_end
     output = run_console("1\n2\n")
-    assert_equal 3, output.scan('prism> ').size
+    assert_equal 3, output.scan('facet> ').size
   end
 
   def test_local_variables_persist_across_lines
@@ -40,7 +40,7 @@ class CliConsoleTest < Minitest::Test
   def test_custom_prompt_option
     output = run_console("1\n", ['--prompt=blog> '])
     assert_includes output, 'blog> '
-    refute_includes output, 'prism> '
+    refute_includes output, 'facet> '
   end
 
   def test_syntax_error_is_reported_without_aborting_the_session
@@ -72,7 +72,7 @@ class CliConsoleTest < Minitest::Test
   end
 
   def test_unknown_option_raises_usage_error
-    assert_raises(Prism::Cli::UsageError) { @cli.console(['--bogus'], input: StringIO.new, out: StringIO.new) }
+    assert_raises(Facet::Cli::UsageError) { @cli.console(['--bogus'], input: StringIO.new, out: StringIO.new) }
   end
 
   def test_require_option_loads_a_file_before_the_session_starts
@@ -93,6 +93,6 @@ class CliConsoleTest < Minitest::Test
   end
 
   def test_c_alias_is_recognized_by_run_dispatch
-    assert_raises(Prism::Cli::UsageError) { @cli.run(%w[c --bogus]) }
+    assert_raises(Facet::Cli::UsageError) { @cli.run(%w[c --bogus]) }
   end
 end

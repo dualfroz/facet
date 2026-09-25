@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class I18nTranslatorTest < Minitest::Test
   def setup
-    @backend = Prism::I18n::Backend.new
+    @backend = Facet::I18n::Backend.new
     @backend.store_translations(:en, {
       'greeting' => 'Hello, %{name}!',
       'apples' => { 'zero' => 'no apples', 'one' => 'one apple', 'other' => '%{count} apples' },
@@ -11,7 +11,7 @@ class I18nTranslatorTest < Minitest::Test
       'nav' => { 'home' => 'Home' }
     })
     @backend.store_translations(:pl, 'nav' => { 'home' => 'Strona glowna' })
-    @translator = Prism::I18n::Translator.new(@backend, default_locale: :en)
+    @translator = Facet::I18n::Translator.new(@backend, default_locale: :en)
   end
 
   def test_translate_plain_string
@@ -23,13 +23,13 @@ class I18nTranslatorTest < Minitest::Test
   end
 
   def test_translate_missing_interpolation_argument_raises
-    assert_raises(Prism::I18n::Translator::MissingInterpolationError) do
+    assert_raises(Facet::I18n::Translator::MissingInterpolationError) do
       @translator.translate('greeting', locale: :en)
     end
   end
 
   def test_translate_missing_key_raises_by_default
-    assert_raises(Prism::I18n::Translator::MissingTranslationError) do
+    assert_raises(Facet::I18n::Translator::MissingTranslationError) do
       @translator.translate('nowhere.at.all', locale: :en)
     end
   end
@@ -57,10 +57,10 @@ class I18nTranslatorTest < Minitest::Test
   end
 
   def test_custom_fallback_chain_is_tried_before_default_locale
-    backend = Prism::I18n::Backend.new
+    backend = Facet::I18n::Backend.new
     backend.store_translations(:en, 'only_en' => 'English only')
     backend.store_translations(:'pt-BR', 'greeting' => 'Ola')
-    translator = Prism::I18n::Translator.new(backend, default_locale: :en, fallbacks: { pt: [:'pt-BR'] })
+    translator = Facet::I18n::Translator.new(backend, default_locale: :en, fallbacks: { pt: [:'pt-BR'] })
     assert_equal 'Ola', translator.translate('greeting', locale: :pt)
   end
 

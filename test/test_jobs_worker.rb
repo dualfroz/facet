@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
@@ -36,8 +36,8 @@ end
 
 class WorkerTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-jobs-worker')
-    @queue = Prism::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
+    @dir = Dir.mktmpdir('facet-jobs-worker')
+    @queue = Facet::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
     RecordingJob.log.clear
     FlakyJob.reset!
   end
@@ -50,7 +50,7 @@ class WorkerTest < Minitest::Test
     @queue.enqueue(job_class: 'RecordingJob', args: ['a'])
     @queue.enqueue(job_class: 'RecordingJob', args: ['b'])
 
-    processed = Prism::Jobs::Worker.new(@queue).work_off
+    processed = Facet::Jobs::Worker.new(@queue).work_off
 
     assert_equal 2, processed
     assert_equal %w[a b], RecordingJob.log.sort
@@ -61,7 +61,7 @@ class WorkerTest < Minitest::Test
     @queue.enqueue(job_class: 'RecordingJob', args: ['now'])
     @queue.enqueue(job_class: 'RecordingJob', args: ['later'], run_at: Time.now + 3600)
 
-    processed = Prism::Jobs::Worker.new(@queue).work_off
+    processed = Facet::Jobs::Worker.new(@queue).work_off
 
     assert_equal 1, processed
     assert_equal ['now'], RecordingJob.log
@@ -70,7 +70,7 @@ class WorkerTest < Minitest::Test
 
   def test_failing_job_is_retried_and_eventually_succeeds
     @queue.enqueue(job_class: 'FlakyJob', args: [])
-    worker = Prism::Jobs::Worker.new(@queue)
+    worker = Facet::Jobs::Worker.new(@queue)
 
     worker.work_off
     assert_equal 0, worker.work_off, 'retry is backed off into the future, not immediately ready'
@@ -86,7 +86,7 @@ class WorkerTest < Minitest::Test
 
   def test_job_that_always_fails_is_dead_lettered_after_max_attempts
     @queue.enqueue(job_class: 'AlwaysFailsJob', args: [], max_attempts: 2)
-    worker = Prism::Jobs::Worker.new(@queue)
+    worker = Facet::Jobs::Worker.new(@queue)
 
     worker.work_off
     force_all_due
@@ -100,7 +100,7 @@ class WorkerTest < Minitest::Test
   def test_error_handler_is_invoked_with_the_exception_and_job
     seen = []
     @queue.enqueue(job_class: 'AlwaysFailsJob', args: [], max_attempts: 5)
-    worker = Prism::Jobs::Worker.new(@queue, error_handler: ->(error, job) { seen << [error.message, job[:job_class]] })
+    worker = Facet::Jobs::Worker.new(@queue, error_handler: ->(error, job) { seen << [error.message, job[:job_class]] })
 
     worker.work_off
 
@@ -111,7 +111,7 @@ class WorkerTest < Minitest::Test
     @queue.enqueue(job_class: 'RecordingJob', args: ['default-queue'])
     @queue.enqueue(job_class: 'RecordingJob', args: ['mailers-queue'], queue_name: 'mailers')
 
-    processed = Prism::Jobs::Worker.new(@queue, queue_name: 'mailers').work_off
+    processed = Facet::Jobs::Worker.new(@queue, queue_name: 'mailers').work_off
 
     assert_equal 1, processed
     assert_equal ['mailers-queue'], RecordingJob.log
@@ -121,9 +121,9 @@ class WorkerTest < Minitest::Test
   def test_process_publishes_perform_job_instrumentation_event
     @queue.enqueue(job_class: 'RecordingJob', args: ['c'], queue_name: 'mailers')
     events = []
-    subscriber = Prism::Instrumentation.subscribe('perform_job.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('perform_job.facet') { |event| events << event }
 
-    Prism::Jobs::Worker.new(@queue, queue_name: 'mailers').work_off
+    Facet::Jobs::Worker.new(@queue, queue_name: 'mailers').work_off
 
     assert_equal 1, events.size
     assert_equal 'RecordingJob', events.first.payload[:job_class]
@@ -131,28 +131,25 @@ class WorkerTest < Minitest::Test
     assert_equal 'completed', events.first.payload[:status]
     assert_kind_of Float, events.first.duration
   ensure
-    Prism::Instrumentation.unsubscribe(subscriber)
+    Facet::Instrumentation.unsubscribe(subscriber)
   end
 
   def test_process_publishes_instrumentation_event_with_exception_on_failure
     @queue.enqueue(job_class: 'AlwaysFailsJob', args: [], max_attempts: 5)
     events = []
-    subscriber = Prism::Instrumentation.subscribe('perform_job.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('perform_job.facet') { |event| events << event }
 
-    Prism::Jobs::Worker.new(@queue).work_off
+    Facet::Jobs::Worker.new(@queue).work_off
 
     assert_equal 1, events.size
     assert_nil events.first.payload[:status]
     assert_equal 'nope', events.first.payload[:exception][1]
   ensure
-    Prism::Instrumentation.unsubscribe(subscriber)
+    Facet::Instrumentation.unsubscribe(subscriber)
   end
 
   private
 
-  # Real retries are scheduled with backoff into the future; tests that
-  # need to observe a second/third attempt without sleeping reach into the
-  # store to pull a job's run_at back into the past instead.
   def force_all_due
     pstore = @queue.instance_variable_get(:@pstore)
     pstore.transaction { pstore[:jobs].each_value { |job| job[:run_at] = Time.now - 1 } }

@@ -1,16 +1,16 @@
 require 'minitest/autorun'
 require 'json'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmSerializationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-serialization-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-serialization-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:authors, %w[id name email password_digest created_at])
     @store.create_table(:articles, %w[id author_id title body])
 
-    author_class = Class.new(Prism::Orm::Model) do
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :articles, class_name: 'Article', foreign_key: 'author_id'
       has_secure_password validations: false
@@ -19,7 +19,7 @@ class OrmSerializationTest < Minitest::Test
         "hi #{name}"
       end
     end
-    article_class = Class.new(Prism::Orm::Model) do
+    article_class = Class.new(Facet::Orm::Model) do
       table_name :articles
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
@@ -130,7 +130,7 @@ class OrmSerializationTest < Minitest::Test
   end
 
   def test_hide_from_json_is_inherited_by_subclasses
-    base_class = Class.new(Prism::Orm::Model) { table_name :authors }
+    base_class = Class.new(Facet::Orm::Model) { table_name :authors }
     base_class.hide_from_json(:email)
     Object.const_set(:BaseAuthor, base_class)
     sub_class = Class.new(base_class) { table_name :authors }

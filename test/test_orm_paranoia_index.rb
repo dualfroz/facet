@@ -1,29 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# Store has no concept of paranoia at all (see Paranoia#paranoid_scope - it is
-# just a plain `relation.where(deleted_at: nil)` bolted on by Model.all/.count).
-# Store#lookup_by_index only ever requires an index's OWN columns to be present
-# in the equality Hash it is given, never the reverse, so a `status`-only index
-# is used even when the real condition tree also carries `deleted_at: nil` from
-# the paranoid scope - the index itself returns every row with that status,
-# soft-deleted rows included, and Relation#rows re-checks the FULL condition
-# against every index-returned candidate before returning (see
-# ConditionNode#indexed_candidates). Store#add_column's backfill
-# (rebuild_indexes_covering) iterates every row in definition[:rows], which
-# still holds soft-deleted rows too (paranoia never physically removes them),
-# so a column added after some rows were already trashed still gets those rows
-# correctly indexed. None of this required a code change - it was already true
-# by construction - but nothing had exercised paranoia and secondary indexes
-# together until now (see prism-postep.md session 82 "kierunki dalsze").
 class OrmParanoiaIndexTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-paranoia-index')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-paranoia-index')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:tickets, %w[id title status deleted_at])
 
-    ticket_class = Class.new(Prism::Orm::Model) do
+    ticket_class = Class.new(Facet::Orm::Model) do
       table_name :tickets
       acts_as_paranoid
     end
@@ -45,10 +30,6 @@ class OrmParanoiaIndexTest < Minitest::Test
     visible = ParanoidTicket.where(status: 'open').to_a
     assert_equal ['a'], visible.map { |ticket| ticket['title'] }
 
-    # The raw index is paranoia-blind by design: both rows come back for
-    # status "open", the soft-deleted one included. Correctness comes from
-    # Relation#rows re-filtering index candidates through the whole
-    # condition (deleted_at: nil included), not from the index excluding it.
     raw_hits = @store.lookup_by_index(:tickets, { 'status' => 'open' })
     assert_equal ['a', 'b'], raw_hits.map { |row| row['title'] }.sort
   end
@@ -59,9 +40,6 @@ class OrmParanoiaIndexTest < Minitest::Test
     id_live = @store.insert(:tickets, title: 'a')
     id_trashed = @store.insert(:tickets, title: 'b')
     @store.update(:tickets, id_trashed, 'deleted_at' => Time.now.utc)
-    # Index the column BEFORE it exists (like OrmIndexColumnMigrationTest's
-    # own add_column-backfill tests) so add_column's rebuild is the only
-    # thing that can possibly populate this index, for either row.
     @store.add_index(:tickets, :status)
 
     @store.add_column(:tickets, :status, default: 'open')

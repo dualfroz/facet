@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class RouterConstraintsTest < Minitest::Test
   def setup
-    @router = Prism::Router.new
+    @router = Facet::Router.new
   end
 
   def test_constraint_accepts_matching_segment
@@ -28,7 +28,7 @@ end
 
 class RouterFormatTest < Minitest::Test
   def setup
-    @router = Prism::Router.new
+    @router = Facet::Router.new
   end
 
   def test_format_disabled_by_default_dynamic_segment_keeps_dots

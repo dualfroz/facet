@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class CsrfTest < Minitest::Test
   def setup
     @session = {}
-    @csrf = Prism::Csrf.new(@session)
+    @csrf = Facet::Csrf.new(@session)
   end
 
   def test_raw_token_is_persisted_in_session
     token = @csrf.raw_token
-    assert_equal token, @session[Prism::Csrf::SESSION_KEY]
+    assert_equal token, @session[Facet::Csrf::SESSION_KEY]
   end
 
   def test_raw_token_is_stable_across_calls
@@ -32,7 +32,7 @@ class CsrfTest < Minitest::Test
 
   def test_token_from_different_session_is_rejected
     other_session = {}
-    other_csrf = Prism::Csrf.new(other_session)
+    other_csrf = Facet::Csrf.new(other_session)
     refute @csrf.valid_token?(other_csrf.masked_token)
   end
 

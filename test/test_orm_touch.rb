@@ -1,21 +1,21 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmTouchTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-touch-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-touch-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name created_at updated_at published_at])
     @store.create_table(:gadgets, %w[id name])
 
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
     end
     widget_class.store = @store
     Object.const_set(:Widget, widget_class)
 
-    gadget_class = Class.new(Prism::Orm::Model) do
+    gadget_class = Class.new(Facet::Orm::Model) do
       table_name :gadgets
     end
     gadget_class.store = @store
@@ -38,7 +38,7 @@ class OrmTouchTest < Minitest::Test
   end
 
   def test_touch_does_not_run_validations
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       validates :name, presence: true
     end
@@ -64,7 +64,7 @@ class OrmTouchTest < Minitest::Test
 
   def test_touch_runs_after_touch_callback
     log = []
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       after_touch { log << :after_touch }
     end
@@ -78,7 +78,7 @@ class OrmTouchTest < Minitest::Test
 
   def test_touch_does_not_run_before_save_callbacks
     log = []
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       before_save { log << :before_save }
       after_save { log << :after_save }
@@ -94,13 +94,13 @@ class OrmTouchTest < Minitest::Test
 
   def test_touch_on_a_new_record_raises
     widget = Widget.new(name: 'gizmo')
-    assert_raises(Prism::Orm::RecordNotFound) { widget.touch }
+    assert_raises(Facet::Orm::RecordNotFound) { widget.touch }
   end
 
   def test_touch_on_a_destroyed_record_raises
     widget = Widget.create!(name: 'gizmo')
     widget.destroy
-    assert_raises(Prism::Orm::RecordNotFound) { widget.touch }
+    assert_raises(Facet::Orm::RecordNotFound) { widget.touch }
   end
 
   def test_touch_without_updated_at_column_and_no_names_is_a_no_op
@@ -111,7 +111,7 @@ class OrmTouchTest < Minitest::Test
   def test_touch_busts_cache_key
     widget = Widget.create!(name: 'gizmo')
     original_key = widget.cache_key
-    sleep 1.01 # cache_key truncates to whole seconds (Time#to_i)
+    sleep 1.01
 
     widget.touch
 
@@ -120,7 +120,7 @@ class OrmTouchTest < Minitest::Test
 
   def test_touch_bumps_lock_version_when_optimistic_locking_is_enabled
     @store.create_table(:locked_widgets, %w[id name updated_at lock_version])
-    locked_class = Class.new(Prism::Orm::Model) do
+    locked_class = Class.new(Facet::Orm::Model) do
       table_name :locked_widgets
     end
     locked_class.store = @store
@@ -135,7 +135,7 @@ class OrmTouchTest < Minitest::Test
 
   def test_touch_raises_stale_object_error_on_lock_version_mismatch
     @store.create_table(:locked_widgets, %w[id name updated_at lock_version])
-    locked_class = Class.new(Prism::Orm::Model) do
+    locked_class = Class.new(Facet::Orm::Model) do
       table_name :locked_widgets
     end
     locked_class.store = @store
@@ -143,6 +143,6 @@ class OrmTouchTest < Minitest::Test
     stale_copy = locked_class.find(widget.id)
     widget.touch
 
-    assert_raises(Prism::Orm::StaleObjectError) { stale_copy.touch }
+    assert_raises(Facet::Orm::StaleObjectError) { stale_copy.touch }
   end
 end

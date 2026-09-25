@@ -1,17 +1,17 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class OrmLockingTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-locking')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-locking')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name lock_version])
     @store.create_table(:plain_things, %w[id name])
 
-    widget_class = Class.new(Prism::Orm::Model) { table_name :widgets }
-    plain_class = Class.new(Prism::Orm::Model) { table_name :plain_things }
+    widget_class = Class.new(Facet::Orm::Model) { table_name :widgets }
+    plain_class = Class.new(Facet::Orm::Model) { table_name :plain_things }
     [widget_class, plain_class].each { |klass| klass.store = @store }
     Object.const_set(:Widget, widget_class)
     Object.const_set(:PlainThing, plain_class)
@@ -53,7 +53,7 @@ class OrmLockingTest < Minitest::Test
     original.update!(name: 'fresh')
 
     stale_copy.name = 'stale'
-    error = assert_raises(Prism::Orm::StaleObjectError) { stale_copy.save! }
+    error = assert_raises(Facet::Orm::StaleObjectError) { stale_copy.save! }
     assert_same stale_copy, error.record
     assert_equal :update, error.attempted_action
 
@@ -67,7 +67,7 @@ class OrmLockingTest < Minitest::Test
     original.update!(name: 'fresh')
 
     stale_copy.name = 'stale'
-    assert_raises(Prism::Orm::StaleObjectError) { stale_copy.save! }
+    assert_raises(Facet::Orm::StaleObjectError) { stale_copy.save! }
 
     stale_copy.reload
     stale_copy.name = 'retried'
@@ -80,7 +80,7 @@ class OrmLockingTest < Minitest::Test
     stale_copy = Widget.find(original.id)
     original.update!(name: 'changed')
 
-    error = assert_raises(Prism::Orm::StaleObjectError) { stale_copy.destroy }
+    error = assert_raises(Facet::Orm::StaleObjectError) { stale_copy.destroy }
     assert_equal :destroy, error.attempted_action
     refute_nil Widget.find(original.id), 'stale destroy must not have deleted the row'
   end
@@ -88,7 +88,7 @@ class OrmLockingTest < Minitest::Test
   def test_current_destroy_succeeds
     widget = Widget.create!(name: 'a')
     widget.destroy
-    assert_raises(Prism::Orm::RecordNotFound) { Widget.find(widget.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { Widget.find(widget.id) }
   end
 
   def test_model_without_lock_version_column_ignores_locking_entirely
@@ -101,7 +101,7 @@ class OrmLockingTest < Minitest::Test
 
   def test_locking_column_can_be_customized
     @store.create_table(:gizmos, %w[id name version_number])
-    gizmo_class = Class.new(Prism::Orm::Model) do
+    gizmo_class = Class.new(Facet::Orm::Model) do
       table_name :gizmos
       locking_column :version_number
     end
@@ -115,19 +115,12 @@ class OrmLockingTest < Minitest::Test
     stale = gizmo_class.find(gizmo.id)
     gizmo.update!(name: 'c')
     stale.name = 'stale'
-    assert_raises(Prism::Orm::StaleObjectError) { stale.save! }
+    assert_raises(Facet::Orm::StaleObjectError) { stale.save! }
   end
 
-  # Real cross-process proof: N processes each retry a load -> increment ->
-  # save loop against the SAME row until their own increment sticks. If the
-  # version check and the write were not inside the same PStore transaction
-  # (or if Model silently swallowed StaleObjectError instead of raising),
-  # concurrent writers would stomp on each other's increments and the final
-  # counter would fall short of the true total - the classic optimistic
-  # locking lost-update problem this feature exists to prevent.
   def test_prevents_lost_updates_across_real_concurrent_processes
     store_path = File.join(@dir, 'shared.pstore')
-    shared_store = Prism::Orm::Store.new(store_path)
+    shared_store = Facet::Orm::Store.new(store_path)
     shared_store.create_table(:counters, %w[id counter lock_version])
     shared_store.insert(:counters, id: 1, counter: 0, lock_version: 0)
 
@@ -136,9 +129,9 @@ class OrmLockingTest < Minitest::Test
 
     racer_script = File.join(@dir, 'racer.rb')
     File.write(racer_script, <<~RUBY)
-      require 'prism'
-      store = Prism::Orm::Store.new(#{store_path.inspect})
-      Counter = Class.new(Prism::Orm::Model) { table_name :counters }
+      require 'facet'
+      store = Facet::Orm::Store.new(#{store_path.inspect})
+      Counter = Class.new(Facet::Orm::Model) { table_name :counters }
       Counter.store = store
 
       successes = 0
@@ -146,11 +139,11 @@ class OrmLockingTest < Minitest::Test
       while successes < #{increments_per_process}
         counter = Counter.find(1)
         counter.counter = counter.counter + 1
-        sleep(rand * 0.005) # widen the read-then-write window so processes actually overlap
+        sleep(rand * 0.005)
         begin
           counter.save!
           successes += 1
-        rescue Prism::Orm::StaleObjectError
+        rescue Facet::Orm::StaleObjectError
           retries += 1
         end
       end

@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmQueryPredicatesTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-query-predicates')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-query-predicates')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:products, %w[id name price stock])
-    product_class = Class.new(Prism::Orm::Model) do
+    product_class = Class.new(Facet::Orm::Model) do
       table_name :products
     end
     product_class.store = @store
@@ -80,7 +80,7 @@ class OrmQueryPredicatesTest < Minitest::Test
   end
 
   def test_unknown_operator_raises
-    error = assert_raises(Prism::Orm::Query::Predicates::UnknownOperator) do
+    error = assert_raises(Facet::Orm::Query::Predicates::UnknownOperator) do
       Product.where(price: { bogus: 1 }).to_a
     end
     assert_match(/bogus/, error.message)

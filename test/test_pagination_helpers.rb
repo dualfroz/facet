@@ -1,19 +1,19 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class PaginationHelpersTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-pagination-helpers')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-pagination-helpers')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name position])
-    widget_class = Class.new(Prism::Orm::Model) { table_name :widgets }
+    widget_class = Class.new(Facet::Orm::Model) { table_name :widgets }
     widget_class.store = @store
     Object.const_set(:PaginatedWidget, widget_class)
     25.times { |i| PaginatedWidget.create!(name: "widget-#{i}", position: i) }
 
-    @context = Prism::Template::Context.new({})
+    @context = Facet::Template::Context.new({})
   end
 
   def teardown
@@ -66,7 +66,7 @@ class PaginationHelpersTest < Minitest::Test
     FileUtils.mkdir_p(views_dir)
     File.write(File.join(views_dir, 'index.erb'), '<%== paginate(widgets, path: ->(n) { "/widgets?page=#{n}" }) %>')
 
-    view = Prism::View.new(File.join(@dir, 'views'))
+    view = Facet::View.new(File.join(@dir, 'views'))
     output = view.render('widgets/index', locals: { widgets: PaginatedWidget.order(:position).page(1).per(5) })
     assert_includes output, '<nav class="pagination">'
     assert_includes output, 'href="/widgets?page=2"'

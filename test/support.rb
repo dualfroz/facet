@@ -1,4 +1,4 @@
-require 'prism'
+require 'facet'
 require 'stringio'
 
 module TestSupport

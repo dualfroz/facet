@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 class EchoMountedApp
@@ -9,7 +9,7 @@ class EchoMountedApp
   end
 end
 
-class MountApp < Prism::Application
+class MountApp < Facet::Application
   mount '/admin', EchoMountedApp.new
 
   get '/host-route' do
@@ -17,7 +17,7 @@ class MountApp < Prism::Application
   end
 end
 
-class MountPrecedenceApp < Prism::Application
+class MountPrecedenceApp < Facet::Application
   mount '/shared', EchoMountedApp.new
 
   get '/shared' do

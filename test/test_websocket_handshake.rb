@@ -1,11 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class WebSocketHandshakeTest < Minitest::Test
-  Handshake = Prism::WebSocket::Handshake
+  Handshake = Facet::WebSocket::Handshake
 
-  # RFC 6455 section 1.3's worked example - the canonical regression test
-  # for any Sec-WebSocket-Accept implementation.
   def test_accept_key_matches_the_rfc_6455_worked_example
     assert_equal 's3pPLMBiTxaQ9kYGzzhZRbK+xOo=', Handshake.accept_key('dGhlIHNhbXBsZSBub25jZQ==')
   end

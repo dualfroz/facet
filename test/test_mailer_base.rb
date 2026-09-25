@@ -1,21 +1,21 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class MailerBaseTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-mailer-base')
+    @dir = Dir.mktmpdir('facet-mailer-base')
     FileUtils.mkdir_p(File.join(@dir, 'user'))
-    Prism::Mailer.deliveries.clear
-    Prism::Mailer.delivery_method = :test
+    Facet::Mailer.deliveries.clear
+    Facet::Mailer.delivery_method = :test
 
     write('user/welcome.text.erb', "Hi <%= name %>, welcome!\n")
     write('user/welcome.html.erb', "<p>Hi <%= name %>, welcome!</p>\n")
     write('user/text_only.text.erb', "plain only for <%= name %>\n")
 
     mailer_dir = @dir
-    @mailer_class = Class.new(Prism::Mailer::Base) do
+    @mailer_class = Class.new(Facet::Mailer::Base) do
       self.template_roots = [mailer_dir]
       default from: 'noreply@example.com'
 
@@ -64,15 +64,15 @@ class MailerBaseTest < Minitest::Test
     assert_equal 'noreply@example.com', delivery.message.from
   end
 
-  def test_deliver_now_hands_the_message_to_prism_mailer
+  def test_deliver_now_hands_the_message_to_facet_mailer
     UserMailer.welcome(name: 'Cleo', email: 'cleo@example.com').deliver_now
-    assert_equal 1, Prism::Mailer.deliveries.size
-    assert_includes Prism::Mailer.deliveries.last.to_s, 'Cleo'
+    assert_equal 1, Facet::Mailer.deliveries.size
+    assert_includes Facet::Mailer.deliveries.last.to_s, 'Cleo'
   end
 
   def test_deliver_now_publishes_deliver_mail_instrumentation_event
     events = []
-    subscriber = Prism::Instrumentation.subscribe('deliver_mail.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('deliver_mail.facet') { |event| events << event }
 
     UserMailer.welcome(name: 'Eve', email: 'eve@example.com').deliver_now
 
@@ -82,7 +82,7 @@ class MailerBaseTest < Minitest::Test
     assert_equal :test, events.first.payload[:delivery_method]
     assert_kind_of Float, events.first.duration
   ensure
-    Prism::Instrumentation.unsubscribe(subscriber)
+    Facet::Instrumentation.unsubscribe(subscriber)
   end
 
   def test_explicit_template_option_overrides_the_action_name
@@ -92,7 +92,7 @@ class MailerBaseTest < Minitest::Test
   end
 
   def test_missing_template_for_both_variants_raises_template_not_found
-    assert_raises(Prism::View::TemplateNotFound) do
+    assert_raises(Facet::View::TemplateNotFound) do
       UserMailer.missing_template(email: 'nobody@example.com')
     end
   end

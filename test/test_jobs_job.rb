@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
-class WelcomeEmailJob < Prism::Jobs::Job
+class WelcomeEmailJob < Facet::Jobs::Job
   queue_as :mailers
   retry_on max_attempts: 7, backoff: :linear, base_delay: 5
 
@@ -16,7 +16,7 @@ class WelcomeEmailJob < Prism::Jobs::Job
   end
 end
 
-class PlainJob < Prism::Jobs::Job
+class PlainJob < Facet::Jobs::Job
   def self.ran
     @ran ||= false
   end
@@ -32,9 +32,9 @@ end
 
 class JobTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-jobs-job')
-    @queue = Prism::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
-    Prism::Jobs.default_queue = @queue
+    @dir = Dir.mktmpdir('facet-jobs-job')
+    @queue = Facet::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
+    Facet::Jobs.default_queue = @queue
     WelcomeEmailJob.sent_to.clear
     PlainJob.reset!
   end
@@ -87,7 +87,7 @@ class JobTest < Minitest::Test
 
   def test_enqueued_jobs_actually_run_through_a_worker
     WelcomeEmailJob.perform_later(505)
-    Prism::Jobs::Worker.new(@queue).work_off
+    Facet::Jobs::Worker.new(@queue).work_off
 
     assert_equal [505], WelcomeEmailJob.sent_to
   end

@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmQueryCombinatorsTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-query-combinators')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-query-combinators')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:tickets, %w[id title status priority])
-    ticket_class = Class.new(Prism::Orm::Model) do
+    ticket_class = Class.new(Facet::Orm::Model) do
       table_name :tickets
     end
     ticket_class.store = @store

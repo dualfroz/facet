@@ -1,24 +1,24 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmBelongsToTouchTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-belongs-to-touch-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-belongs-to-touch-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title updated_at reviewed_at])
     @store.create_table(:comments, %w[id body post_id updated_at])
     @store.create_table(:notes, %w[id body post_id updated_at])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id'
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id', touch: true
     end
-    note_class = Class.new(Prism::Orm::Model) do
+    note_class = Class.new(Facet::Orm::Model) do
       table_name :notes
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id', touch: :reviewed_at
     end
@@ -100,24 +100,16 @@ class OrmBelongsToTouchTest < Minitest::Test
     comment.update!(body: 'edited after owner is gone')
   end
 
-  # Regression: an optimistically-locked, paranoid owner cascading its own
-  # destroy into touch: true children (has_many ..., dependent: :destroy)
-  # used to raise StaleObjectError - each cascaded child's after_destroy
-  # touch re-found and re-locked the owner's row, so by the time the
-  # owner's own soft-delete wrote back it was holding a now-stale
-  # lock_version it had read before the cascade started. Caught by
-  # examples/blog's blog_demo.rb (POST /posts/:id DELETE -> 500) before
-  # this test existed.
   def test_destroying_a_locked_paranoid_owner_with_cascaded_touching_children_does_not_raise
     @store.create_table(:locked_posts, %w[id title deleted_at lock_version])
     @store.create_table(:locked_comments, %w[id body locked_post_id deleted_at])
 
-    locked_post_class = Class.new(Prism::Orm::Model) do
+    locked_post_class = Class.new(Facet::Orm::Model) do
       table_name :locked_posts
       acts_as_paranoid
       has_many :comments, class_name: 'LockedComment', foreign_key: 'locked_post_id', dependent: :destroy
     end
-    locked_comment_class = Class.new(Prism::Orm::Model) do
+    locked_comment_class = Class.new(Facet::Orm::Model) do
       table_name :locked_comments
       acts_as_paranoid
       belongs_to :post, class_name: 'LockedPost', foreign_key: 'locked_post_id', touch: true

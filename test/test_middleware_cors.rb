@@ -1,26 +1,26 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 class MiddlewareCorsTest < Minitest::Test
   include TestSupport
 
   def setup
-    Prism::Cors.reset!
+    Facet::Cors.reset!
     @downstream_calls = 0
     downstream = lambda do |_env|
       @downstream_calls += 1
       [200, {'Content-Type' => 'application/json'}, ['{}']]
     end
-    @app = Prism::Middleware::Cors.new(downstream)
+    @app = Facet::Middleware::Cors.new(downstream)
   end
 
   def teardown
-    Prism::Cors.reset!
+    Facet::Cors.reset!
   end
 
   def configure_api(**resource_options)
-    Prism::Cors.configure do |config|
+    Facet::Cors.configure do |config|
       config.allow do
         origins 'https://app.example.com'
         resource '/api/*', **resource_options
@@ -123,9 +123,9 @@ class MiddlewareCorsTest < Minitest::Test
   end
 
   def test_vary_origin_is_appended_to_an_existing_vary_header
-    Prism::Cors.reset!
+    Facet::Cors.reset!
     downstream = lambda { |_env| [200, {'Vary' => 'Accept'}, ['{}']] }
-    app = Prism::Middleware::Cors.new(downstream)
+    app = Facet::Middleware::Cors.new(downstream)
     configure_api(methods: %w[GET])
     env = env_for('GET', '/api/posts', headers: {'Origin' => 'https://app.example.com'})
     _, headers, = app.call(env)

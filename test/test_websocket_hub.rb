@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class WebSocketHubTest < Minitest::Test
   FakeConnection = Struct.new(:messages, :dead) do
@@ -7,9 +7,6 @@ class WebSocketHubTest < Minitest::Test
       super([], false)
     end
 
-    # Mirrors the real Connection#write_frame: a dead socket does not raise
-    # out of write_text, it just silently marks itself closed - Hub relies
-    # on that contract to notice and drop dead subscribers.
     def write_text(payload)
       return if dead
       messages << payload
@@ -21,7 +18,7 @@ class WebSocketHubTest < Minitest::Test
   end
 
   def setup
-    @hub = Prism::WebSocket::Hub.new
+    @hub = Facet::WebSocket::Hub.new
   end
 
   def test_broadcast_delivers_json_encoded_hash_to_every_subscriber
@@ -116,7 +113,7 @@ class WebSocketHubTest < Minitest::Test
   end
 
   def test_subscribe_rejects_a_new_connection_once_the_stream_is_at_capacity
-    hub = Prism::WebSocket::Hub.new(max_subscribers_per_stream: 2)
+    hub = Facet::WebSocket::Hub.new(max_subscribers_per_stream: 2)
     a = FakeConnection.new
     b = FakeConnection.new
     c = FakeConnection.new
@@ -131,23 +128,21 @@ class WebSocketHubTest < Minitest::Test
   end
 
   def test_subscribe_at_capacity_is_still_idempotent_for_an_existing_subscriber
-    hub = Prism::WebSocket::Hub.new(max_subscribers_per_stream: 1)
+    hub = Facet::WebSocket::Hub.new(max_subscribers_per_stream: 1)
     a = FakeConnection.new
     assert_equal true, hub.subscribe('room_1', a)
-    # Re-subscribing the same connection must not be rejected just because
-    # the stream is "full" - it was already counted once, this is a no-op.
     assert_equal true, hub.subscribe('room_1', a)
     assert_equal 1, hub.subscribers('room_1').size
   end
 
   def test_a_cap_is_scoped_to_one_stream_not_shared_across_streams
-    hub = Prism::WebSocket::Hub.new(max_subscribers_per_stream: 1)
+    hub = Facet::WebSocket::Hub.new(max_subscribers_per_stream: 1)
     assert_equal true, hub.subscribe('room_1', FakeConnection.new)
     assert_equal true, hub.subscribe('room_2', FakeConnection.new)
   end
 
   def test_unsubscribing_frees_a_slot_for_a_new_connection_to_take
-    hub = Prism::WebSocket::Hub.new(max_subscribers_per_stream: 1)
+    hub = Facet::WebSocket::Hub.new(max_subscribers_per_stream: 1)
     a = FakeConnection.new
     b = FakeConnection.new
     assert_equal true, hub.subscribe('room_1', a)
@@ -159,7 +154,7 @@ class WebSocketHubTest < Minitest::Test
   end
 
   def test_capacity_is_enforced_correctly_under_concurrent_subscribe_attempts
-    hub = Prism::WebSocket::Hub.new(max_subscribers_per_stream: 5)
+    hub = Facet::WebSocket::Hub.new(max_subscribers_per_stream: 5)
     connections = Array.new(50) { FakeConnection.new }
     results = Array.new(50)
     threads = connections.each_with_index.map do |connection, i|
@@ -167,8 +162,6 @@ class WebSocketHubTest < Minitest::Test
     end
     threads.each(&:join)
 
-    # Exactly 5 of the 50 concurrent attempts may have won a slot - not more
-    # (the cap held under contention), not fewer (no lost wakeups/deadlock).
     assert_equal 5, results.count(true)
     assert_equal 5, hub.subscribers('hot_stream').size
   end

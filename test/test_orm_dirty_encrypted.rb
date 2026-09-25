@@ -1,23 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
-# Session 55/56/58 left this as a known, unverified gap: Dirty (ActiveModel::
-# Dirty-lite) reads @attributes directly, so on an `encrypts`-backed column
-# every dirty-tracking call (changed_attributes/changes/attribute_was/
-# attribute_change) leaked raw ciphertext instead of the plaintext the
-# model's own reader returns. This file is the end-to-end proof that the
-# fix (Dirty#humanize_dirty_value, Encryption's setter no-op-on-same-value)
-# actually closes that gap, on the same non-deterministic and deterministic
-# split test_orm_encryption.rb already exercises for plain reads.
 class OrmDirtyEncryptedTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-dirty-encrypted-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-dirty-encrypted-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:patients, %w[id name ssn notes])
-    Prism::Orm::Encryption.primary_key = 'test-primary-key-do-not-use-in-prod'
+    Facet::Orm::Encryption.primary_key = 'test-primary-key-do-not-use-in-prod'
 
-    patient_class = Class.new(Prism::Orm::Model) do
+    patient_class = Class.new(Facet::Orm::Model) do
       table_name :patients
       encrypts :ssn, deterministic: true
       encrypts :notes
@@ -28,7 +20,7 @@ class OrmDirtyEncryptedTest < Minitest::Test
 
   def teardown
     FileUtils.remove_entry(@dir)
-    Prism::Orm::Encryption.primary_key = nil
+    Facet::Orm::Encryption.primary_key = nil
     Object.send(:remove_const, :DirtyEncryptedPatient) if Object.const_defined?(:DirtyEncryptedPatient)
   end
 

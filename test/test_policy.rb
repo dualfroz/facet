@@ -1,23 +1,23 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 PolicyTestUser = Struct.new(:id)
 PolicyTestArticle = Struct.new(:id, :owner_id)
 
-class PolicyTestArticlePolicy < Prism::Policy
+class PolicyTestArticlePolicy < Facet::Policy
   def edit?
     user && record.owner_id == user.id
   end
   alias_method :destroy?, :edit?
 end
 
-class PolicyTestArticlePolicy::Scope < Prism::Policy::Scope
+class PolicyTestArticlePolicy::Scope < Facet::Policy::Scope
   def resolve
     scope.select { |article| user && article.owner_id == user.id }
   end
 end
 
-class PolicyEmptyPolicy < Prism::Policy
+class PolicyEmptyPolicy < Facet::Policy
 end
 
 class PolicyTest < Minitest::Test
@@ -51,8 +51,8 @@ class PolicyTest < Minitest::Test
   end
 
   def test_for_record_resolves_the_conventional_policy_class
-    assert_equal PolicyTestArticlePolicy, Prism::Policy.for_record(@article)
-    assert_equal PolicyTestArticlePolicy, Prism::Policy.for_record(PolicyTestArticle)
+    assert_equal PolicyTestArticlePolicy, Facet::Policy.for_record(@article)
+    assert_equal PolicyTestArticlePolicy, Facet::Policy.for_record(PolicyTestArticle)
   end
 
   def test_scope_resolves_to_only_the_users_own_records
@@ -62,11 +62,11 @@ class PolicyTest < Minitest::Test
   end
 
   def test_scope_base_class_requires_resolve_to_be_implemented
-    assert_raises(NotImplementedError) { Prism::Policy::Scope.new(@owner, []).resolve }
+    assert_raises(NotImplementedError) { Facet::Policy::Scope.new(@owner, []).resolve }
   end
 
   def test_not_authorized_error_carries_record_and_query
-    error = Prism::Policy::NotAuthorizedError.new(@article, 'destroy?')
+    error = Facet::Policy::NotAuthorizedError.new(@article, 'destroy?')
     assert_equal @article, error.record
     assert_equal 'destroy?', error.query
     assert_includes error.message, 'destroy?'

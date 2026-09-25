@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmCallbacksTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-callbacks-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-callbacks-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name])
     @log = []
     log = @log
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       validates :name, presence: true
 
@@ -80,7 +80,7 @@ class OrmCallbacksTest < Minitest::Test
   end
 
   def test_symbol_callback_can_mutate_the_record
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       before_save :normalize_name
 

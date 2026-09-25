@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 require 'stringio'
 
 class CliAssetsPrecompileTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-cli-assets')
-    @cli = Prism::Cli.new(@dir)
+    @dir = Dir.mktmpdir('facet-cli-assets')
+    @cli = Facet::Cli.new(@dir)
     @source = File.join(@dir, 'app', 'assets')
     @output = File.join(@dir, 'public', 'assets')
     FileUtils.mkdir_p(File.join(@source, 'stylesheets'))
@@ -41,8 +41,8 @@ class CliAssetsPrecompileTest < Minitest::Test
   end
 
   def test_raises_usage_error_without_required_options
-    assert_raises(Prism::Cli::UsageError) { @cli.assets_precompile([]) }
-    assert_raises(Prism::Cli::UsageError) { @cli.assets_precompile(['--source=app/assets']) }
+    assert_raises(Facet::Cli::UsageError) { @cli.assets_precompile([]) }
+    assert_raises(Facet::Cli::UsageError) { @cli.assets_precompile(['--source=app/assets']) }
   end
 
   def test_run_dispatches_the_assets_colon_precompile_command

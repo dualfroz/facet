@@ -1,10 +1,10 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 require 'tmpdir'
 
-class AuthSessionsController < Prism::Controller
-  include Prism::Authenticatable
+class AuthSessionsController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser
 
   def create
@@ -23,8 +23,8 @@ class AuthSessionsController < Prism::Controller
   end
 end
 
-class AuthDashboardController < Prism::Controller
-  include Prism::Authenticatable
+class AuthDashboardController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in'
   before_action :require_authentication
 
@@ -33,8 +33,8 @@ class AuthDashboardController < Prism::Controller
   end
 end
 
-class AuthApiController < Prism::Controller
-  include Prism::Authenticatable
+class AuthApiController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser
   before_action :require_authentication
 
@@ -43,8 +43,8 @@ class AuthApiController < Prism::Controller
   end
 end
 
-class AuthRememberSessionsController < Prism::Controller
-  include Prism::Authenticatable
+class AuthRememberSessionsController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, remember_cookie: :remember_token
 
   def create
@@ -63,8 +63,8 @@ class AuthRememberSessionsController < Prism::Controller
   end
 end
 
-class AuthRememberDashboardController < Prism::Controller
-  include Prism::Authenticatable
+class AuthRememberDashboardController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in', remember_cookie: :remember_token
   before_action :require_authentication
 
@@ -73,12 +73,8 @@ class AuthRememberDashboardController < Prism::Controller
   end
 end
 
-# `authenticate_with` is declared only on the base class here, the way a
-# real app declares it once on ApplicationController - proving the setting
-# (and its unauthenticated_redirect_path) reaches a subclass that never
-# calls `authenticate_with` itself.
-class AuthBaseController < Prism::Controller
-  include Prism::Authenticatable
+class AuthBaseController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in'
 end
 
@@ -90,8 +86,8 @@ class AuthInheritedController < AuthBaseController
   end
 end
 
-class AuthMultiSessionsController < Prism::Controller
-  include Prism::Authenticatable
+class AuthMultiSessionsController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, remember_sessions: :AuthLoginSession
 
   def create
@@ -110,8 +106,8 @@ class AuthMultiSessionsController < Prism::Controller
   end
 end
 
-class AuthMultiDashboardController < Prism::Controller
-  include Prism::Authenticatable
+class AuthMultiDashboardController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in', remember_sessions: :AuthLoginSession
   before_action :require_authentication
 
@@ -129,17 +125,13 @@ class AuthMultiDashboardController < Prism::Controller
   end
 
   def revoke
-    # Deliberately the raw String params['id'] gives, not params['id'].to_i -
-    # a real controller (see examples/blog's LoginSessionsController) has no
-    # reason to convert it itself; revoke_login_session! must do that on its
-    # own or every real HTTP request would silently no-op (see its comment).
     ok = revoke_login_session!(params['id'])
     halt(ok ? 200 : 404, ok ? 'revoked' : 'not found')
   end
 end
 
-class AuthCappedSessionsController < Prism::Controller
-  include Prism::Authenticatable
+class AuthCappedSessionsController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, remember_sessions: :AuthLoginSession, max_remember_sessions: 2
 
   def create
@@ -153,8 +145,8 @@ class AuthCappedSessionsController < Prism::Controller
   end
 end
 
-class AuthCappedDashboardController < Prism::Controller
-  include Prism::Authenticatable
+class AuthCappedDashboardController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in',
                      remember_sessions: :AuthLoginSession, max_remember_sessions: 2
   before_action :require_authentication
@@ -164,8 +156,8 @@ class AuthCappedDashboardController < Prism::Controller
   end
 end
 
-class AuthZeroCappedSessionsController < Prism::Controller
-  include Prism::Authenticatable
+class AuthZeroCappedSessionsController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, remember_sessions: :AuthLoginSession, max_remember_sessions: 0
 
   def create
@@ -179,8 +171,8 @@ class AuthZeroCappedSessionsController < Prism::Controller
   end
 end
 
-class AuthZeroCappedDashboardController < Prism::Controller
-  include Prism::Authenticatable
+class AuthZeroCappedDashboardController < Facet::Controller
+  include Facet::Authenticatable
   authenticate_with model: :AuthUser, unauthenticated_redirect_path: '/sign_in',
                      remember_sessions: :AuthLoginSession, max_remember_sessions: 0
   before_action :require_authentication
@@ -190,7 +182,7 @@ class AuthZeroCappedDashboardController < Prism::Controller
   end
 end
 
-class AuthenticatableApp < Prism::Application
+class AuthenticatableApp < Facet::Application
   enable_sessions(secret: 'auth-secret')
   post '/sign_in', to: 'auth_sessions#create'
   post '/sign_out', to: 'auth_sessions#destroy'
@@ -216,11 +208,11 @@ class AuthenticatableTest < Minitest::Test
   include TestSupport
 
   def setup
-    @dir = Dir.mktmpdir('prism-authenticatable')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-authenticatable')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:auth_users, %w[id email password_digest remember_token])
     @store.create_table(:auth_login_sessions, %w[id user_id token user_agent ip_address])
-    user_class = Class.new(Prism::Orm::Model) do
+    user_class = Class.new(Facet::Orm::Model) do
       table_name :auth_users
       has_secure_password
       has_secure_token :remember_token
@@ -228,14 +220,14 @@ class AuthenticatableTest < Minitest::Test
     user_class.store = @store
     Object.const_set(:AuthUser, user_class)
 
-    login_session_class = Class.new(Prism::Orm::Model) do
+    login_session_class = Class.new(Facet::Orm::Model) do
       table_name :auth_login_sessions
       has_secure_token :token
     end
     login_session_class.store = @store
     Object.const_set(:AuthLoginSession, login_session_class)
 
-    AuthUser.create!(email: 'foksiu@example.com', password: 'hunter2')
+    AuthUser.create!(email: 'alice@example.com', password: 'hunter2')
   end
 
   def teardown
@@ -249,7 +241,7 @@ class AuthenticatableTest < Minitest::Test
   end
 
   def session_cookie_from(headers)
-    cookie_named(headers, 'prism.session')
+    cookie_named(headers, 'facet.session')
   end
 
   def cookie_named(headers, name)
@@ -260,14 +252,14 @@ class AuthenticatableTest < Minitest::Test
   def sign_in_cookie
     _, headers, = call('POST', '/sign_in',
                         headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                        body: 'email=foksiu@example.com&password=hunter2')
+                        body: 'email=alice@example.com&password=hunter2')
     session_cookie_from(headers)
   end
 
   def test_wrong_password_is_rejected
     status, = call('POST', '/sign_in',
                     headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                    body: 'email=foksiu@example.com&password=wrong')
+                    body: 'email=alice@example.com&password=wrong')
     assert_equal 401, status
   end
 
@@ -286,7 +278,7 @@ class AuthenticatableTest < Minitest::Test
     cookie = sign_in_cookie
     status, _, body = call('GET', '/dashboard', cookies: cookie)
     assert_equal 200, status
-    assert_equal 'hello foksiu@example.com', body.join
+    assert_equal 'hello alice@example.com', body.join
   end
 
   def test_sign_out_forgets_current_user
@@ -306,7 +298,7 @@ class AuthenticatableTest < Minitest::Test
     _, sign_in_headers, body = call('POST', '/sign_in',
                                      headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
                                      cookies: cookie,
-                                     body: 'email=foksiu@example.com&password=hunter2')
+                                     body: 'email=alice@example.com&password=hunter2')
     assert_equal '/dashboard', body.join
     refute_nil sign_in_headers['Set-Cookie']
   end
@@ -321,30 +313,26 @@ class AuthenticatableTest < Minitest::Test
     cookie = sign_in_cookie
     status, _, body = call('GET', '/inherited/me', cookies: cookie)
     assert_equal 200, status
-    assert_equal 'hello foksiu@example.com', body.join
+    assert_equal 'hello alice@example.com', body.join
   end
 
   def test_signing_in_without_remember_sets_no_remember_cookie
     _, headers, = call('POST', '/remember/sign_in',
                         headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                        body: 'email=foksiu@example.com&password=hunter2')
+                        body: 'email=alice@example.com&password=hunter2')
     assert_nil cookie_named(headers, 'remember_token')
   end
 
   def test_remember_cookie_alone_survives_a_lost_session_cookie
     _, sign_in_headers, = call('POST', '/remember/sign_in',
                                 headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                                body: 'email=foksiu@example.com&password=hunter2&remember=1')
+                                body: 'email=alice@example.com&password=hunter2&remember=1')
     remember_cookie = cookie_named(sign_in_headers, 'remember_token')
     refute_nil remember_cookie
 
-    # No session cookie at all here - simulates a brand new browser session
-    # (browser restart) that only still has the persistent cookie.
     status, dashboard_headers, body = call('GET', '/remember/dashboard', cookies: remember_cookie)
     assert_equal 200, status
-    assert_equal 'hello foksiu@example.com', body.join
-    # The fast path (session) is repopulated for the next request on this
-    # same browser, so it does not need to re-verify the cookie every time.
+    assert_equal 'hello alice@example.com', body.join
     refute_nil session_cookie_from(dashboard_headers)
   end
 
@@ -356,7 +344,7 @@ class AuthenticatableTest < Minitest::Test
   def test_dashboard_rejects_a_tampered_remember_cookie
     _, sign_in_headers, = call('POST', '/remember/sign_in',
                                 headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                                body: 'email=foksiu@example.com&password=hunter2&remember=1')
+                                body: 'email=alice@example.com&password=hunter2&remember=1')
     remember_cookie = cookie_named(sign_in_headers, 'remember_token')
     tampered = remember_cookie.sub('remember_token=', 'remember_token=tampered')
 
@@ -367,7 +355,7 @@ class AuthenticatableTest < Minitest::Test
   def test_sign_out_rotates_the_token_so_the_old_remember_cookie_stops_working
     _, sign_in_headers, = call('POST', '/remember/sign_in',
                                 headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                                body: 'email=foksiu@example.com&password=hunter2&remember=1')
+                                body: 'email=alice@example.com&password=hunter2&remember=1')
     remember_cookie = cookie_named(sign_in_headers, 'remember_token')
     session_cookie = session_cookie_from(sign_in_headers)
 
@@ -380,14 +368,14 @@ class AuthenticatableTest < Minitest::Test
   def multi_sign_in(remember: true)
     _, headers, = call('POST', '/multi/sign_in',
                         headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                        body: "email=foksiu@example.com&password=hunter2&remember=#{remember ? '1' : '0'}")
+                        body: "email=alice@example.com&password=hunter2&remember=#{remember ? '1' : '0'}")
     headers
   end
 
   def test_remember_sessions_rejects_both_options_at_once
     error = assert_raises(ArgumentError) do
-      Class.new(Prism::Controller) do
-        include Prism::Authenticatable
+      Class.new(Facet::Controller) do
+        include Facet::Authenticatable
         authenticate_with model: :AuthUser, remember_cookie: :remember_token, remember_sessions: :AuthLoginSession
       end
     end
@@ -398,13 +386,13 @@ class AuthenticatableTest < Minitest::Test
     assert_equal 0, AuthLoginSession.count
     multi_sign_in
     assert_equal 1, AuthLoginSession.count
-    assert_equal AuthUser.find_by(email: 'foksiu@example.com').id, AuthLoginSession.first.user_id
+    assert_equal AuthUser.find_by(email: 'alice@example.com').id, AuthLoginSession.first.user_id
   end
 
   def test_remember_sessions_captures_user_agent_and_ip_when_the_model_has_those_columns
     env = env_for('POST', '/multi/sign_in',
                    headers: { 'Content-Type' => 'application/x-www-form-urlencoded', 'User-Agent' => 'DeviceScanner/9.0' },
-                   body: 'email=foksiu@example.com&password=hunter2&remember=1')
+                   body: 'email=alice@example.com&password=hunter2&remember=1')
     env['REMOTE_ADDR'] = '198.51.100.42'
     AuthenticatableApp.call(env)
 
@@ -420,7 +408,7 @@ class AuthenticatableTest < Minitest::Test
 
     status, dashboard_headers, body = call('GET', '/multi/dashboard', cookies: remember_cookie)
     assert_equal 200, status
-    assert_equal 'hello foksiu@example.com', body.join
+    assert_equal 'hello alice@example.com', body.join
     refute_nil session_cookie_from(dashboard_headers)
   end
 
@@ -521,14 +509,14 @@ class AuthenticatableTest < Minitest::Test
   def capped_sign_in
     _, headers, = call('POST', '/capped/sign_in',
                         headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-                        body: 'email=foksiu@example.com&password=hunter2')
+                        body: 'email=alice@example.com&password=hunter2')
     headers
   end
 
   def test_max_remember_sessions_requires_remember_sessions
     error = assert_raises(ArgumentError) do
-      Class.new(Prism::Controller) do
-        include Prism::Authenticatable
+      Class.new(Facet::Controller) do
+        include Facet::Authenticatable
         authenticate_with model: :AuthUser, max_remember_sessions: 2
       end
     end
@@ -570,13 +558,9 @@ class AuthenticatableTest < Minitest::Test
   def zero_capped_sign_in
     call('POST', '/zero-capped/sign_in',
          headers: { 'Content-Type' => 'application/x-www-form-urlencoded' },
-         body: 'email=foksiu@example.com&password=hunter2')
+         body: 'email=alice@example.com&password=hunter2')
   end
 
-  # `max_remember_sessions: 0` is a deliberately-set "never actually
-  # remembered" limit (see the comment on prune_oldest_login_sessions) -
-  # unlike every positive limit above, it must prune the row `sign_in`
-  # itself just created, not just older ones.
   def test_max_remember_sessions_of_zero_prunes_the_row_it_just_created
     status, headers, = zero_capped_sign_in
     assert_equal 200, status

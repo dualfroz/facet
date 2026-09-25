@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 
 class CookieJarTest < Minitest::Test
@@ -16,9 +16,9 @@ class CookieJarTest < Minitest::Test
       'CONTENT_LENGTH' => '0'
     }
     env['HTTP_COOKIE'] = cookie_header if cookie_header
-    request = Prism::Request.new(env)
-    response = Prism::Response.new
-    [Prism::CookieJar.new(request, response, secret: secret, previous_secrets: previous_secrets), response]
+    request = Facet::Request.new(env)
+    response = Facet::Response.new
+    [Facet::CookieJar.new(request, response, secret: secret, previous_secrets: previous_secrets), response]
   end
 
   def test_plain_set_and_read

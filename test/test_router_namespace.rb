@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
 module Admin
-  class DashboardController < Prism::Controller
+  class DashboardController < Facet::Controller
     def index
       html('admin dashboard')
     end
   end
 
-  class WidgetsController < Prism::Controller
+  class WidgetsController < Facet::Controller
     def index
       html('admin widgets index')
     end
@@ -19,26 +19,19 @@ module Admin
     end
   end
 
-  class GadgetsController < Prism::Controller
+  class GadgetsController < Facet::Controller
     def index
       html('admin gadgets under widget ' + params['widget_id'])
     end
   end
 
-  # Lives directly under Admin (not Admin::LegacyUi) - proves that
-  # `module: false` on an INNER namespace only skips its own module
-  # contribution, while the enclosing `admin` module still applies.
-  class ArchivedController < Prism::Controller
+  class ArchivedController < Facet::Controller
     def index
       html('admin archived (legacy_ui contributed no module)')
     end
   end
 
-  # Registered AFTER the `legacy_ui, module: false` block closes (see
-  # NamespacedApp below) - only resolves correctly if closing that block
-  # popped exactly its own frame off module_stack, leaving ["admin"]
-  # behind for this route instead of popping "admin" too.
-  class AuditsController < Prism::Controller
+  class AuditsController < Facet::Controller
     def index
       html('admin audits after legacy_ui closed')
     end
@@ -47,7 +40,7 @@ end
 
 module Api
   module V1
-    class ReportsController < Prism::Controller
+    class ReportsController < Facet::Controller
       def index
         html('api v1 reports')
       end
@@ -56,23 +49,20 @@ module Api
 end
 
 module Legacy
-  class DashboardController < Prism::Controller
+  class DashboardController < Facet::Controller
     def index
       html('legacy ping')
     end
   end
 end
 
-# Deliberately NOT inside a `Settings` module - this is exactly what
-# `module: false` is for: a URL that looks namespaced without forcing the
-# controller into a matching Ruby module/directory.
-class ProfilesController < Prism::Controller
+class ProfilesController < Facet::Controller
   def show
     html("moduleless profile #{params['id']}")
   end
 end
 
-class NamespacedApp < Prism::Application
+class NamespacedApp < Facet::Application
   namespace :admin do
     root to: 'dashboard#index'
     resources :widgets do
@@ -174,11 +164,6 @@ class RouterNamespaceTest < Minitest::Test
   end
 
   def test_module_false_does_not_leak_into_a_route_declared_after_it_closes
-    # Regression guard for the `ensure` block: if `module_stack.pop` ran
-    # unconditionally (instead of only `if use_module`) it would pop one
-    # frame too many once `legacy_ui`'s block above closes, silently
-    # popping "admin" too - this route (declared right after) would then
-    # resolve to a top-level AuditsController instead of Admin::Audits.
     status, _, body = call('GET', '/admin/audits')
     assert_equal 200, status
     assert_equal 'admin audits after legacy_ui closed', body.join

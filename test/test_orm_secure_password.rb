@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmSecurePasswordTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-secure-password-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-secure-password-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:accounts, %w[id email password_digest pin_digest])
-    account_class = Class.new(Prism::Orm::Model) do
+    account_class = Class.new(Facet::Orm::Model) do
       table_name :accounts
       validates :email, presence: true
       has_secure_password
@@ -45,11 +45,11 @@ class OrmSecurePasswordTest < Minitest::Test
   end
 
   def test_two_digests_from_the_same_password_are_different_but_both_verify
-    first = Prism::Orm::SecurePassword.digest('hunter2')
-    second = Prism::Orm::SecurePassword.digest('hunter2')
+    first = Facet::Orm::SecurePassword.digest('hunter2')
+    second = Facet::Orm::SecurePassword.digest('hunter2')
     refute_equal first, second
-    assert Prism::Orm::SecurePassword.verify(first, 'hunter2')
-    assert Prism::Orm::SecurePassword.verify(second, 'hunter2')
+    assert Facet::Orm::SecurePassword.verify(first, 'hunter2')
+    assert Facet::Orm::SecurePassword.verify(second, 'hunter2')
   end
 
   def test_presence_validation_requires_a_password_on_create

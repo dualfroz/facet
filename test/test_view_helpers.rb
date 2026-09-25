@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class ViewHelpersTest < Minitest::Test
   def render(source, locals = {}, helpers = nil)
-    Prism::Template.render(source, locals, nil, helpers)
+    Facet::Template.render(source, locals, nil, helpers)
   end
 
   def test_tag_renders_void_element

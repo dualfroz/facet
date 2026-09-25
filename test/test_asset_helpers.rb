@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class AssetHelpersTest < Minitest::Test
   def setup
-    Prism::Assets.reset!
-    @context = Prism::Template::Context.new
+    Facet::Assets.reset!
+    @context = Facet::Template::Context.new
   end
 
   def teardown
-    Prism::Assets.reset!
+    Facet::Assets.reset!
   end
 
   def test_asset_path_falls_back_to_the_logical_path_without_a_manifest
@@ -16,23 +16,23 @@ class AssetHelpersTest < Minitest::Test
   end
 
   def test_asset_path_uses_the_manifest_when_one_is_loaded
-    Prism::Assets.manifest = Prism::Assets::Manifest.new('application.css' => 'application-deadbeef.css')
+    Facet::Assets.manifest = Facet::Assets::Manifest.new('application.css' => 'application-deadbeef.css')
     assert_equal '/assets/application-deadbeef.css', @context.asset_path('application.css')
   end
 
   def test_asset_path_raises_for_an_unknown_asset_once_a_manifest_is_loaded
-    Prism::Assets.manifest = Prism::Assets::Manifest.new
-    assert_raises(Prism::Assets::Manifest::AssetNotFound) { @context.asset_path('missing.css') }
+    Facet::Assets.manifest = Facet::Assets::Manifest.new
+    assert_raises(Facet::Assets::Manifest::AssetNotFound) { @context.asset_path('missing.css') }
   end
 
   def test_stylesheet_link_tag
-    Prism::Assets.manifest = Prism::Assets::Manifest.new('application.css' => 'application-deadbeef.css')
+    Facet::Assets.manifest = Facet::Assets::Manifest.new('application.css' => 'application-deadbeef.css')
     assert_equal '<link rel="stylesheet" href="/assets/application-deadbeef.css">',
                  @context.stylesheet_link_tag('application.css')
   end
 
   def test_javascript_include_tag
-    Prism::Assets.manifest = Prism::Assets::Manifest.new('application.js' => 'application-cafef00d.js')
+    Facet::Assets.manifest = Facet::Assets::Manifest.new('application.js' => 'application-cafef00d.js')
     assert_equal '<script src="/assets/application-cafef00d.js"></script>',
                  @context.javascript_include_tag('application.js')
   end

@@ -1,15 +1,15 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmEncryptionTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-encryption-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-encryption-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:patients, %w[id name ssn notes])
-    Prism::Orm::Encryption.primary_key = 'test-primary-key-do-not-use-in-prod'
+    Facet::Orm::Encryption.primary_key = 'test-primary-key-do-not-use-in-prod'
 
-    patient_class = Class.new(Prism::Orm::Model) do
+    patient_class = Class.new(Facet::Orm::Model) do
       table_name :patients
       encrypts :ssn, deterministic: true
       encrypts :notes
@@ -20,7 +20,7 @@ class OrmEncryptionTest < Minitest::Test
 
   def teardown
     FileUtils.remove_entry(@dir)
-    Prism::Orm::Encryption.primary_key = nil
+    Facet::Orm::Encryption.primary_key = nil
     Object.send(:remove_const, :EncryptedPatient) if Object.const_defined?(:EncryptedPatient)
   end
 
@@ -75,7 +75,7 @@ class OrmEncryptionTest < Minitest::Test
   end
 
   def test_querying_a_non_deterministic_column_by_plaintext_raises
-    error = assert_raises(Prism::Orm::Encryption::Error) { EncryptedPatient.where(notes: 'anything').to_a }
+    error = assert_raises(Facet::Orm::Encryption::Error) { EncryptedPatient.where(notes: 'anything').to_a }
     assert_match(/not deterministic/, error.message)
   end
 
@@ -96,7 +96,7 @@ class OrmEncryptionTest < Minitest::Test
     tampered['notes'] = row['notes'].sub(/^./) { |c| c == 'A' ? 'B' : 'A' }
     @store.update(:patients, patient.id, tampered)
     reloaded = EncryptedPatient.find(patient.id)
-    assert_raises(Prism::Orm::Encryption::Error) { reloaded.notes }
+    assert_raises(Facet::Orm::Encryption::Error) { reloaded.notes }
   end
 
   def test_encrypted_attributes_are_hidden_from_json_by_default
@@ -120,7 +120,7 @@ class OrmEncryptionTest < Minitest::Test
   end
 
   def test_a_column_scoped_key_overrides_the_shared_primary_key
-    scoped_class = Class.new(Prism::Orm::Model) do
+    scoped_class = Class.new(Facet::Orm::Model) do
       table_name :patients
       encrypts :notes, key: 'a-completely-different-secret'
     end
@@ -128,22 +128,22 @@ class OrmEncryptionTest < Minitest::Test
     record = scoped_class.create!(name: 'Bob', notes: 'private')
     assert_equal 'private', record.notes
 
-    default_key_class = Class.new(Prism::Orm::Model) do
+    default_key_class = Class.new(Facet::Orm::Model) do
       table_name :patients
       encrypts :notes
     end
     default_key_class.store = @store
-    assert_raises(Prism::Orm::Encryption::Error) { default_key_class.find(record.id).notes }
+    assert_raises(Facet::Orm::Encryption::Error) { default_key_class.find(record.id).notes }
   end
 
   def test_encrypts_without_any_key_configured_raises_a_clear_error
-    Prism::Orm::Encryption.primary_key = nil
-    unconfigured_class = Class.new(Prism::Orm::Model) do
+    Facet::Orm::Encryption.primary_key = nil
+    unconfigured_class = Class.new(Facet::Orm::Model) do
       table_name :patients
       encrypts :notes
     end
     unconfigured_class.store = @store
-    error = assert_raises(Prism::Orm::Encryption::Error) { unconfigured_class.new(notes: 'x') }
+    error = assert_raises(Facet::Orm::Encryption::Error) { unconfigured_class.new(notes: 'x') }
     assert_match(/primary_key=/, error.message)
   end
 end

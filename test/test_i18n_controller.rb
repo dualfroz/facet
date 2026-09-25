@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class GreetingsController < Prism::Controller
+class GreetingsController < Facet::Controller
   def show
     html(t('hello'))
   end
@@ -17,7 +17,7 @@ class GreetingsController < Prism::Controller
   end
 end
 
-class GreetingsApp < Prism::Application
+class GreetingsApp < Facet::Application
   enable_sessions secret: 'i18n-controller-test-secret'
 
   get '/greet', to: 'greetings#show'
@@ -29,13 +29,13 @@ class I18nControllerTest < Minitest::Test
   include TestSupport
 
   def setup
-    Prism::I18n.reset!
-    Prism::I18n.store_translations(:en, 'hello' => 'Hello')
-    Prism::I18n.store_translations(:pl, 'hello' => 'Czesc')
+    Facet::I18n.reset!
+    Facet::I18n.store_translations(:en, 'hello' => 'Hello')
+    Facet::I18n.store_translations(:pl, 'hello' => 'Czesc')
   end
 
   def teardown
-    Prism::I18n.reset!
+    Facet::I18n.reset!
   end
 
   def call(method, path, **opts)
@@ -71,7 +71,7 @@ class I18nControllerTest < Minitest::Test
     status, headers, body = call('GET', '/greet/remember?locale=pl')
     assert_equal 200, status
     assert_equal 'Czesc', body.join
-    line = headers['Set-Cookie'].split("\n").find { |c| c.start_with?('prism.session=') }
+    line = headers['Set-Cookie'].split("\n").find { |c| c.start_with?('facet.session=') }
     cookie = line.split(';').first
 
     _, _, body = call('GET', '/greet', cookies: cookie)

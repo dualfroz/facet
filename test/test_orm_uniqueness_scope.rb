@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmUniquenessScopeTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-uniqueness-scope-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-uniqueness-scope-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:likes, %w[id likeable_id likeable_type user_id])
 
-    like_class = Class.new(Prism::Orm::Model) do
+    like_class = Class.new(Facet::Orm::Model) do
       table_name :likes
       validates :user_id, presence: true, uniqueness: { scope: %i[likeable_id likeable_type] }
     end
@@ -58,9 +58,9 @@ class OrmUniquenessScopeTest < Minitest::Test
   end
 
   def test_unscoped_uniqueness_still_works_without_a_scope_option
-    scoreless_store = Prism::Orm::Store.new(File.join(@dir, 'scoreless.pstore'))
+    scoreless_store = Facet::Orm::Store.new(File.join(@dir, 'scoreless.pstore'))
     scoreless_store.create_table(:tags, %w[id name])
-    tag_class = Class.new(Prism::Orm::Model) do
+    tag_class = Class.new(Facet::Orm::Model) do
       table_name :tags
       validates :name, presence: true, uniqueness: true
     end

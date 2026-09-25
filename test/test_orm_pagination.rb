@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmPaginationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-pagination-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-pagination-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name position])
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
     end
     widget_class.store = @store

@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class RouterMountTest < Minitest::Test
   def setup
-    @router = Prism::Router.new
+    @router = Facet::Router.new
   end
 
   def test_finds_mount_for_exact_prefix

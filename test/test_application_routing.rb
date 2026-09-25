@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class ResourceApp < Prism::Application
+class ResourceApp < Facet::Application
   enable_sessions(secret: 'routing-secret')
 
   root(to: 'welcome#show')
@@ -28,13 +28,13 @@ class ResourceApp < Prism::Application
   end
 end
 
-class WelcomeController < Prism::Controller
+class WelcomeController < Facet::Controller
   def show
     html('welcome')
   end
 end
 
-class RoutingPostsController < Prism::Controller
+class RoutingPostsController < Facet::Controller
   def index
     json(action: 'index')
   end
@@ -48,7 +48,7 @@ class RoutingPostsController < Prism::Controller
   end
 end
 
-class RoutingCommentsController < Prism::Controller
+class RoutingCommentsController < Facet::Controller
   def destroy
     json(action: 'destroy', id: params['id'])
   end
@@ -97,10 +97,6 @@ class ApplicationRoutingTest < Minitest::Test
     assert_equal({ 'action' => 'destroy', 'id' => '3' }, JSON.parse(body.join))
   end
 
-  # Regression: add_resource_route used to skip `as:` for :destroy, so a
-  # resource declared with only: [:destroy] (no :show alongside it) had no
-  # named route at all - url_for/link_to/button_to for a delete link had no
-  # path to build from.
   def test_url_for_named_resource_route_for_destroy_only_resource
     _, _, body = call('GET', '/destroy-link')
     assert_equal '/routing_comments/7', JSON.parse(body.join)['path']
@@ -125,11 +121,11 @@ class ApplicationRoutingTest < Minitest::Test
 
   def test_controller_dispatch_enriches_process_action_payload
     events = []
-    subscriber = Prism::Instrumentation.subscribe('process_action.prism') { |event| events << event }
+    subscriber = Facet::Instrumentation.subscribe('process_action.facet') { |event| events << event }
     begin
       call('GET', '/routing_posts/9')
     ensure
-      Prism::Instrumentation.unsubscribe(subscriber)
+      Facet::Instrumentation.unsubscribe(subscriber)
     end
 
     assert_equal 1, events.size

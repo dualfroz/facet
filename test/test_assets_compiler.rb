@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
@@ -8,7 +8,7 @@ class AssetsCompilerTest < Minitest::Test
     with_source do |source, output|
       write(source, 'application.css', 'body { color: red; }')
 
-      manifest = Prism::Assets::Compiler.new(source: source, output: output).compile!
+      manifest = Facet::Assets::Compiler.new(source: source, output: output).compile!
 
       fingerprinted = manifest.lookup('application.css')
       assert_match(/\Aapplication-[0-9a-f]{8}\.css\z/, fingerprinted)
@@ -19,7 +19,7 @@ class AssetsCompilerTest < Minitest::Test
   def test_same_content_produces_the_same_fingerprint_across_compiles
     with_source do |source, output|
       write(source, 'app.js', 'console.log(1);')
-      compiler = Prism::Assets::Compiler.new(source: source, output: output)
+      compiler = Facet::Assets::Compiler.new(source: source, output: output)
 
       first = compiler.compile!.lookup('app.js')
       second = compiler.compile!.lookup('app.js')
@@ -31,7 +31,7 @@ class AssetsCompilerTest < Minitest::Test
   def test_changed_content_produces_a_different_fingerprint
     with_source do |source, output|
       write(source, 'app.js', 'console.log(1);')
-      compiler = Prism::Assets::Compiler.new(source: source, output: output)
+      compiler = Facet::Assets::Compiler.new(source: source, output: output)
       first = compiler.compile!.lookup('app.js')
 
       write(source, 'app.js', 'console.log(2);')
@@ -44,7 +44,7 @@ class AssetsCompilerTest < Minitest::Test
   def test_stale_fingerprinted_files_are_removed_on_recompile
     with_source do |source, output|
       write(source, 'app.js', 'console.log(1);')
-      compiler = Prism::Assets::Compiler.new(source: source, output: output)
+      compiler = Facet::Assets::Compiler.new(source: source, output: output)
       old_fingerprinted = compiler.compile!.lookup('app.js')
       old_path = File.join(output, old_fingerprinted)
       assert File.file?(old_path)
@@ -60,7 +60,7 @@ class AssetsCompilerTest < Minitest::Test
     with_source do |source, output|
       write(source, 'a.css', 'a')
       write(source, 'b.css', 'b')
-      compiler = Prism::Assets::Compiler.new(source: source, output: output)
+      compiler = Facet::Assets::Compiler.new(source: source, output: output)
       first = compiler.compile!
       a_fingerprint = first.lookup('a.css')
 
@@ -76,7 +76,7 @@ class AssetsCompilerTest < Minitest::Test
     with_source do |source, output|
       write(source, 'css/nested/theme.css', '.x{}')
 
-      manifest = Prism::Assets::Compiler.new(source: source, output: output).compile!
+      manifest = Facet::Assets::Compiler.new(source: source, output: output).compile!
 
       fingerprinted = manifest.lookup('css/nested/theme.css')
       assert_match(%r{\Acss/nested/theme-[0-9a-f]{8}\.css\z}, fingerprinted)
@@ -87,7 +87,7 @@ class AssetsCompilerTest < Minitest::Test
   def test_writes_manifest_json_to_the_output_directory
     with_source do |source, output|
       write(source, 'a.css', 'a')
-      Prism::Assets::Compiler.new(source: source, output: output).compile!
+      Facet::Assets::Compiler.new(source: source, output: output).compile!
 
       manifest_path = File.join(output, 'manifest.json')
       assert File.file?(manifest_path)

@@ -1,12 +1,12 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'net/http'
 require 'tmpdir'
 require 'fileutils'
 
 class IntegrationOrmTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-e2e-orm')
+    @dir = Dir.mktmpdir('facet-e2e-orm')
     @db_path = File.join(@dir, 'blog.pstore')
     @views_dir = File.join(@dir, 'views', 'e2e_posts')
     FileUtils.mkdir_p(@views_dir)
@@ -18,17 +18,17 @@ class IntegrationOrmTest < Minitest::Test
       </ul>
     ERB
 
-    Prism::Orm.connect(@db_path)
-    Prism::Orm.store.create_table(:e2e_posts, %w[id title body created_at updated_at])
+    Facet::Orm.connect(@db_path)
+    Facet::Orm.store.create_table(:e2e_posts, %w[id title body created_at updated_at])
 
     views_dir = File.dirname(@views_dir)
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :e2e_posts
       validates :title, presence: true
     end
     Object.const_set(:E2ePost, post_class)
 
-    controller_class = Class.new(Prism::Controller) do
+    controller_class = Class.new(Facet::Controller) do
       views_root views_dir
 
       define_method(:index) { render(:index, locals: { posts: E2ePost.order(:id) }) }
@@ -39,7 +39,7 @@ class IntegrationOrmTest < Minitest::Test
     end
     Object.const_set(:E2ePostsController, controller_class)
 
-    app_class = Class.new(Prism::Application) do
+    app_class = Class.new(Facet::Application) do
       get '/posts', to: 'e2e_posts#index'
       post '/posts', to: 'e2e_posts#create'
     end
@@ -53,11 +53,11 @@ class IntegrationOrmTest < Minitest::Test
   end
 
   def test_post_then_get_round_trip_and_survives_a_process_restart
-    @server = Prism::Server.new(E2eBlogApp, port: 0).start
+    @server = Facet::Server.new(E2eBlogApp, port: 0).start
     port = @server.port
 
     create_response = Net::HTTP.start('127.0.0.1', port) do |http|
-      http.post('/posts', URI.encode_www_form(title: 'Hello Prism', body: 'first real post'),
+      http.post('/posts', URI.encode_www_form(title: 'Hello Facet', body: 'first real post'),
                  'Content-Type' => 'application/x-www-form-urlencoded')
     end
     assert_equal '201', create_response.code
@@ -66,20 +66,17 @@ class IntegrationOrmTest < Minitest::Test
 
     listing_response = Net::HTTP.get_response(URI("http://127.0.0.1:#{port}/posts"))
     assert_equal '200', listing_response.code
-    assert_includes listing_response.body, 'Hello Prism: first real post'
+    assert_includes listing_response.body, 'Hello Facet: first real post'
 
     @server.stop
     @server = nil
 
-    # Simulate a process restart: reconnect to the same file with a brand new
-    # Store instance (no shared in-memory state with the writer above) and
-    # boot a second, independent server against it.
-    Prism::Orm.connect(@db_path)
-    restarted_server = Prism::Server.new(E2eBlogApp, port: 0).start
+    Facet::Orm.connect(@db_path)
+    restarted_server = Facet::Server.new(E2eBlogApp, port: 0).start
     begin
       restarted_response = Net::HTTP.get_response(URI("http://127.0.0.1:#{restarted_server.port}/posts"))
       assert_equal '200', restarted_response.code
-      assert_includes restarted_response.body, 'Hello Prism: first real post',
+      assert_includes restarted_response.body, 'Hello Facet: first real post',
                        'data inserted before the restart must still render after reconnecting to the store file'
     ensure
       restarted_server.stop

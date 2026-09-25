@@ -1,30 +1,30 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmPolymorphicTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-polymorphic-store')
+    @dir = Dir.mktmpdir('facet-polymorphic-store')
     @store = CountingPolymorphicStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
     @store.create_table(:photos, %w[id caption])
     @store.create_table(:likes, %w[id likeable_id likeable_type user_id])
     @store.create_table(:previews, %w[id previewable_id previewable_type url])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :likes, class_name: 'Like', as: :likeable, dependent: :destroy
       has_one :preview, class_name: 'Preview', as: :previewable, dependent: :nullify
     end
-    photo_class = Class.new(Prism::Orm::Model) do
+    photo_class = Class.new(Facet::Orm::Model) do
       table_name :photos
       has_many :likes, class_name: 'Like', as: :likeable, dependent: :destroy
     end
-    like_class = Class.new(Prism::Orm::Model) do
+    like_class = Class.new(Facet::Orm::Model) do
       table_name :likes
       belongs_to :likeable, polymorphic: true
     end
-    preview_class = Class.new(Prism::Orm::Model) do
+    preview_class = Class.new(Facet::Orm::Model) do
       table_name :previews
       belongs_to :previewable, polymorphic: true
     end
@@ -70,9 +70,6 @@ class OrmPolymorphicTest < Minitest::Test
   def test_polymorphic_has_many_scopes_by_type_not_just_id
     post = Post.create!(title: 'hello')
     photo = Photo.create!(caption: 'sunset')
-    # Deliberately share the same numeric id across two different owner
-    # types - the whole point of the type column is that this must not
-    # cause cross-talk between Post#likes and Photo#likes.
     Like.create!(likeable_id: post.id, likeable_type: 'Post', user_id: 1)
     Like.create!(likeable_id: post.id, likeable_type: 'Photo', user_id: 2)
 
@@ -148,9 +145,7 @@ class OrmPolymorphicTest < Minitest::Test
   end
 end
 
-# Mirrors CountingStore/CountingThroughStore from the eager-loading tests -
-# a small local double so this file has no load-order dependency on them.
-class CountingPolymorphicStore < Prism::Orm::Store
+class CountingPolymorphicStore < Facet::Orm::Store
   def initialize(*)
     super
     @query_count = 0

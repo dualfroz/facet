@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 require 'tmpdir'
 require 'fileutils'
@@ -8,7 +8,7 @@ class ControllerTest < Minitest::Test
   include TestSupport
 
   def setup
-    @views_dir = Dir.mktmpdir('prism-controller-views')
+    @views_dir = Dir.mktmpdir('facet-controller-views')
     write_views
     define_controller
     define_app
@@ -34,7 +34,7 @@ class ControllerTest < Minitest::Test
 
   def define_controller
     views_dir = @views_dir
-    controller_class = Class.new(Prism::Controller) do
+    controller_class = Class.new(Facet::Controller) do
       layout :application
       views_root views_dir
 
@@ -69,7 +69,7 @@ class ControllerTest < Minitest::Test
   end
 
   def define_app
-    app_class = Class.new(Prism::Application) do
+    app_class = Class.new(Facet::Application) do
       get '/posts', to: 'posts#index', as: :posts
       get '/posts/:id', to: 'posts#show', as: :post
       post '/posts', to: 'posts#create'

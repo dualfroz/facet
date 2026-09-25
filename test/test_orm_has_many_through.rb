@@ -1,26 +1,26 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmHasManyThroughTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-through-store')
+    @dir = Dir.mktmpdir('facet-through-store')
     @store = CountingThroughStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
     @store.create_table(:commenters, %w[id name])
     @store.create_table(:comments, %w[id post_id commenter_id body])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id', dependent: :destroy
       has_many :commenters, through: :comments, source: :commenter
     end
-    commenter_class = Class.new(Prism::Orm::Model) do
+    commenter_class = Class.new(Facet::Orm::Model) do
       table_name :commenters
       has_many :comments, class_name: 'Comment', foreign_key: 'commenter_id'
       has_many :posts, through: :comments, source: :post
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id'
       belongs_to :commenter, class_name: 'Commenter', foreign_key: 'commenter_id'
@@ -70,7 +70,7 @@ class OrmHasManyThroughTest < Minitest::Test
   end
 
   def test_has_many_through_default_source_is_singularized_name
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id'
       has_many :commenters, through: :comments
@@ -85,7 +85,7 @@ class OrmHasManyThroughTest < Minitest::Test
 
   def test_has_many_through_rejects_dependent_option
     error = assert_raises(ArgumentError) do
-      Class.new(Prism::Orm::Model) do
+      Class.new(Facet::Orm::Model) do
         table_name :posts
         has_many :comments, class_name: 'Comment', foreign_key: 'post_id'
         has_many :commenters, through: :comments, source: :commenter, dependent: :destroy
@@ -114,7 +114,7 @@ class OrmHasManyThroughTest < Minitest::Test
   end
 
   def test_includes_has_many_through_unknown_through_raises
-    broken_class = Class.new(Prism::Orm::Model) do
+    broken_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :commenters, through: :nonexistent, source: :commenter
     end
@@ -124,9 +124,7 @@ class OrmHasManyThroughTest < Minitest::Test
   end
 end
 
-# Wraps Store#all/#find to count reads, mirroring test_orm_eager_loading.rb's
-# CountingStore so this file has no load-order dependency on it.
-class CountingThroughStore < Prism::Orm::Store
+class CountingThroughStore < Facet::Orm::Store
   def initialize(*)
     super
     @query_count = 0

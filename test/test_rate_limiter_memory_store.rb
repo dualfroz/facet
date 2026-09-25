@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class RateLimiterMemoryStoreTest < Minitest::Test
   def setup
-    @store = Prism::RateLimiter::MemoryStore.new
+    @store = Facet::RateLimiter::MemoryStore.new
   end
 
   def test_count_increments_within_the_same_window

@@ -1,26 +1,26 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmHasOneThroughTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-has-one-through-store')
+    @dir = Dir.mktmpdir('facet-has-one-through-store')
     @store = CountingHasOneThroughStore.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:suppliers, %w[id name])
     @store.create_table(:accounts, %w[id supplier_id plan])
     @store.create_table(:account_histories, %w[id account_id notes])
 
-    supplier_class = Class.new(Prism::Orm::Model) do
+    supplier_class = Class.new(Facet::Orm::Model) do
       table_name :suppliers
       has_one :account, class_name: 'Account', foreign_key: 'supplier_id'
       has_one :account_history, through: :account
     end
-    account_class = Class.new(Prism::Orm::Model) do
+    account_class = Class.new(Facet::Orm::Model) do
       table_name :accounts
       belongs_to :supplier, class_name: 'Supplier', foreign_key: 'supplier_id'
       has_one :account_history, class_name: 'AccountHistory', foreign_key: 'account_id'
     end
-    history_class = Class.new(Prism::Orm::Model) do
+    history_class = Class.new(Facet::Orm::Model) do
       table_name :account_histories
       belongs_to :account, class_name: 'Account', foreign_key: 'account_id'
       has_one :supplier, through: :account
@@ -64,7 +64,7 @@ class OrmHasOneThroughTest < Minitest::Test
   end
 
   def test_has_one_through_honors_explicit_source_when_name_differs
-    history_with_alias = Class.new(Prism::Orm::Model) do
+    history_with_alias = Class.new(Facet::Orm::Model) do
       table_name :account_histories
       belongs_to :account, class_name: 'Account', foreign_key: 'account_id'
       has_one :owner, through: :account, source: :supplier
@@ -80,7 +80,7 @@ class OrmHasOneThroughTest < Minitest::Test
 
   def test_has_one_through_rejects_dependent_option
     error = assert_raises(ArgumentError) do
-      Class.new(Prism::Orm::Model) do
+      Class.new(Facet::Orm::Model) do
         table_name :suppliers
         has_one :account, class_name: 'Account', foreign_key: 'supplier_id'
         has_one :account_history, through: :account, dependent: :destroy
@@ -108,11 +108,6 @@ class OrmHasOneThroughTest < Minitest::Test
     assert_includes suppliers.map(&:name), lonely.name
   end
 
-  # Mirrors test_includes_has_one_through_avoids_n_plus_one_queries above,
-  # but from the AccountHistory side where the through step (:account) is a
-  # belongs_to rather than a has_one - exercises the `when :belongs_to then
-  # preload_belongs_to(...)` branch in preload_has_one_through specifically,
-  # which the has_one-through variant above never touches.
   def test_includes_has_one_through_by_belongs_to_avoids_n_plus_one_queries
     3.times do |i|
       supplier = Supplier.create!(name: "supplier#{i}")
@@ -131,7 +126,7 @@ class OrmHasOneThroughTest < Minitest::Test
   end
 
   def test_includes_has_one_through_unknown_through_raises
-    broken_class = Class.new(Prism::Orm::Model) do
+    broken_class = Class.new(Facet::Orm::Model) do
       table_name :suppliers
       has_one :account_history, through: :nonexistent
     end
@@ -141,7 +136,7 @@ class OrmHasOneThroughTest < Minitest::Test
   end
 
   def test_includes_has_one_through_rejects_has_many_through_association
-    broken_class = Class.new(Prism::Orm::Model) do
+    broken_class = Class.new(Facet::Orm::Model) do
       table_name :suppliers
       has_many :accounts, class_name: 'Account', foreign_key: 'supplier_id'
       has_one :account_history, through: :accounts
@@ -152,9 +147,7 @@ class OrmHasOneThroughTest < Minitest::Test
   end
 end
 
-# Wraps Store#all/#find to count reads, mirroring CountingThroughStore in
-# test_orm_has_many_through.rb so this file has no load-order dependency.
-class CountingHasOneThroughStore < Prism::Orm::Store
+class CountingHasOneThroughStore < Facet::Orm::Store
   def initialize(*)
     super
     @query_count = 0

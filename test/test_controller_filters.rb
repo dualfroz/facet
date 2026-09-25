@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class FilterController < Prism::Controller
+class FilterController < Facet::Controller
   before_action(only: %i[index]) { @log = (@log || []) << 'inline-before' }
   before_action :require_token, except: %i[public_action]
   after_action :log_after, except: %i[public_action]
@@ -34,13 +34,13 @@ class FilterController < Prism::Controller
   end
 end
 
-class FilterApp < Prism::Application
+class FilterApp < Facet::Application
   get '/index', to: 'filter#index'
   get '/secret', to: 'filter#secret'
   get '/public', to: 'filter#public_action'
 end
 
-class BaseWithFiltersController < Prism::Controller
+class BaseWithFiltersController < Facet::Controller
   before_action :stamp_base, only: %i[index]
   after_action :stamp_base_after, only: %i[index]
 
@@ -77,7 +77,7 @@ class InheritedFiltersController < BaseWithFiltersController
   end
 end
 
-class InheritedFiltersApp < Prism::Application
+class InheritedFiltersApp < Facet::Application
   get '/inherited', to: 'inherited_filters#index'
   get '/inherited-other', to: 'inherited_filters#other'
 end

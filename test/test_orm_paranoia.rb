@@ -1,12 +1,12 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class OrmParanoiaTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-paranoia-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-paranoia-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name deleted_at])
     @store.create_table(:plain_things, %w[id name])
     @store.create_table(:locked_widgets, %w[id name deleted_at lock_version])
@@ -15,31 +15,31 @@ class OrmParanoiaTest < Minitest::Test
     @store.create_table(:blogs, %w[id name deleted_at entries_count])
     @store.create_table(:entries, %w[id title blog_id deleted_at])
 
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       acts_as_paranoid
     end
-    plain_class = Class.new(Prism::Orm::Model) { table_name :plain_things }
-    locked_widget_class = Class.new(Prism::Orm::Model) do
+    plain_class = Class.new(Facet::Orm::Model) { table_name :plain_things }
+    locked_widget_class = Class.new(Facet::Orm::Model) do
       table_name :locked_widgets
       acts_as_paranoid
     end
-    author_class = Class.new(Prism::Orm::Model) do
+    author_class = Class.new(Facet::Orm::Model) do
       table_name :authors
       has_many :posts, class_name: 'Post', foreign_key: 'author_id', dependent: :destroy
     end
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       acts_as_paranoid
       belongs_to :author, class_name: 'Author', foreign_key: 'author_id'
     end
 
-    blog_class = Class.new(Prism::Orm::Model) do
+    blog_class = Class.new(Facet::Orm::Model) do
       table_name :blogs
       acts_as_paranoid
       has_many :entries, class_name: 'Entry', foreign_key: 'blog_id', dependent: :destroy
     end
-    entry_class = Class.new(Prism::Orm::Model) do
+    entry_class = Class.new(Facet::Orm::Model) do
       table_name :entries
       acts_as_paranoid
       belongs_to :blog, class_name: 'Blog', foreign_key: 'blog_id', counter_cache: true
@@ -68,7 +68,7 @@ class OrmParanoiaTest < Minitest::Test
     refute PlainThing.paranoid?
     thing = PlainThing.create!(name: 'gizmo')
     thing.destroy
-    assert_raises(Prism::Orm::RecordNotFound) { PlainThing.find(thing.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { PlainThing.find(thing.id) }
   end
 
   def test_paranoid_destroy_stamps_the_column_instead_of_deleting
@@ -85,14 +85,14 @@ class OrmParanoiaTest < Minitest::Test
     widget = Widget.create!(name: 'gizmo')
     widget.destroy
 
-    assert_raises(Prism::Orm::RecordNotFound) { Widget.find(widget.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { Widget.find(widget.id) }
     assert_empty Widget.all.to_a
     assert_equal 0, Widget.count
   end
 
   def test_paranoid_destroy_still_runs_before_and_after_destroy_callbacks
     log = []
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       acts_as_paranoid
       before_destroy { log << :before_destroy }
@@ -107,7 +107,7 @@ class OrmParanoiaTest < Minitest::Test
   end
 
   def test_before_destroy_abort_leaves_the_record_undeleted
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       acts_as_paranoid
       before_destroy { throw :abort }
@@ -130,7 +130,7 @@ class OrmParanoiaTest < Minitest::Test
 
   def test_soft_deleting_predicate_is_true_inside_before_destroy_for_a_plain_soft_delete
     seen = nil
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       acts_as_paranoid
       before_destroy { seen = soft_deleting? }
@@ -146,7 +146,7 @@ class OrmParanoiaTest < Minitest::Test
 
   def test_soft_deleting_predicate_is_false_for_really_destroy_bang
     seen = nil
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       acts_as_paranoid
       before_destroy { seen = soft_deleting? }
@@ -161,7 +161,7 @@ class OrmParanoiaTest < Minitest::Test
 
   def test_soft_deleting_predicate_is_false_for_a_non_paranoid_model
     seen = nil
-    plain_class = Class.new(Prism::Orm::Model) do
+    plain_class = Class.new(Facet::Orm::Model) do
       table_name :plain_things
       before_destroy { seen = soft_deleting? }
     end
@@ -217,11 +217,11 @@ class OrmParanoiaTest < Minitest::Test
   def test_really_destroy_bang_on_a_non_paranoid_model_behaves_like_plain_destroy
     thing = PlainThing.create!(name: 'gizmo')
     thing.really_destroy!
-    assert_raises(Prism::Orm::RecordNotFound) { PlainThing.find(thing.id) }
+    assert_raises(Facet::Orm::RecordNotFound) { PlainThing.find(thing.id) }
   end
 
   def test_dependent_destroy_cascades_a_soft_delete_to_paranoid_children
-    author = Author.create!(name: 'foksiu')
+    author = Author.create!(name: 'alice')
     post = Post.create!(title: 'hello', author_id: author.id)
 
     author.destroy
@@ -236,7 +236,7 @@ class OrmParanoiaTest < Minitest::Test
     stale_copy = LockedWidget.find(original.id)
     original.update!(name: 'changed')
 
-    error = assert_raises(Prism::Orm::StaleObjectError) { stale_copy.destroy }
+    error = assert_raises(Facet::Orm::StaleObjectError) { stale_copy.destroy }
     assert_equal :destroy, error.attempted_action
     refute stale_copy.destroyed?
     refute_nil LockedWidget.find(original.id), 'stale soft-delete must not have stamped the row'
@@ -244,7 +244,7 @@ class OrmParanoiaTest < Minitest::Test
 
   def test_paranoid_column_can_be_customized
     @store.create_table(:archivables, %w[id name archived_at])
-    archivable_class = Class.new(Prism::Orm::Model) do
+    archivable_class = Class.new(Facet::Orm::Model) do
       table_name :archivables
       acts_as_paranoid column: 'archived_at'
     end
@@ -299,7 +299,7 @@ class OrmParanoiaTest < Minitest::Test
 
   def test_recursive_restore_recurses_into_grandchildren
     @store.create_table(:pages, %w[id title entry_id deleted_at])
-    page_class = Class.new(Prism::Orm::Model) do
+    page_class = Class.new(Facet::Orm::Model) do
       table_name :pages
       acts_as_paranoid
       belongs_to :entry, class_name: 'Entry', foreign_key: 'entry_id'

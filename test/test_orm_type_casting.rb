@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class OrmTypeCastingTest < Minitest::Test
-  Cast = Prism::Orm::TypeCasting
+  Cast = Facet::Orm::TypeCasting
 
   def test_nil_stays_nil_for_every_type
     %i[string text integer float boolean datetime].each do |type|
@@ -37,12 +37,12 @@ class OrmTypeCastingTest < Minitest::Test
   end
 
   def test_integer_garbage_raises_invalid_cast
-    error = assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Cast.cast(:integer, 'abc') }
+    error = assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Cast.cast(:integer, 'abc') }
     assert_match(/abc/, error.message)
   end
 
   def test_integer_rejects_float_looking_strings
-    assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Cast.cast(:integer, '4.5') }
+    assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Cast.cast(:integer, '4.5') }
   end
 
   def test_float_parses_numeric_strings
@@ -55,7 +55,7 @@ class OrmTypeCastingTest < Minitest::Test
   end
 
   def test_float_garbage_raises_invalid_cast
-    assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Cast.cast(:float, 'nope') }
+    assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Cast.cast(:float, 'nope') }
   end
 
   def test_boolean_recognizes_common_true_strings
@@ -76,7 +76,7 @@ class OrmTypeCastingTest < Minitest::Test
   end
 
   def test_boolean_garbage_raises_invalid_cast_instead_of_guessing_truthy
-    error = assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Cast.cast(:boolean, 'banana') }
+    error = assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Cast.cast(:boolean, 'banana') }
     assert_match(/banana/, error.message)
   end
 
@@ -102,6 +102,6 @@ class OrmTypeCastingTest < Minitest::Test
   end
 
   def test_datetime_garbage_raises_invalid_cast
-    assert_raises(Prism::Orm::TypeCasting::InvalidCast) { Cast.cast(:datetime, 'not a date') }
+    assert_raises(Facet::Orm::TypeCasting::InvalidCast) { Cast.cast(:datetime, 'not a date') }
   end
 end

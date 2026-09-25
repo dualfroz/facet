@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 
 class CliDbTest < Minitest::Test
   def setup
-    @workdir = Dir.mktmpdir('prism-cli-db')
-    @cli = Prism::Cli.new(@workdir)
+    @workdir = Dir.mktmpdir('facet-cli-db')
+    @cli = Facet::Cli.new(@workdir)
     @database = 'db/test.pstore'
     FileUtils.mkdir_p(File.join(@workdir, 'db', 'migrate'))
   end
@@ -17,9 +17,9 @@ class CliDbTest < Minitest::Test
   end
 
   def write_migration(version, class_name, body)
-    path = File.join(@workdir, 'db', 'migrate', "#{version}_#{Prism::Inflector.underscore(class_name)}.rb")
+    path = File.join(@workdir, 'db', 'migrate', "#{version}_#{Facet::Inflector.underscore(class_name)}.rb")
     File.write(path, <<~RUBY)
-      class #{class_name} < Prism::Orm::Migration
+      class #{class_name} < Facet::Orm::Migration
         #{body}
       end
     RUBY
@@ -55,7 +55,7 @@ class CliDbTest < Minitest::Test
   end
 
   def store
-    Prism::Orm::Store.new(File.join(@workdir, @database))
+    Facet::Orm::Store.new(File.join(@workdir, @database))
   end
 
   def test_db_migrate_applies_pending_migrations_and_reports_them
@@ -147,7 +147,7 @@ class CliDbTest < Minitest::Test
   def test_db_commands_use_the_migrations_flag_to_find_a_custom_directory
     FileUtils.mkdir_p(File.join(@workdir, 'other_migrations'))
     File.write(File.join(@workdir, 'other_migrations', '20260101000003_create_thingies_for_cli_db_test.rb'), <<~RUBY)
-      class CreateThingiesForCliDbTest < Prism::Orm::Migration
+      class CreateThingiesForCliDbTest < Facet::Orm::Migration
         def up
           create_table :thingies_for_cli_db_test do |t|
             t.string :name
@@ -167,8 +167,8 @@ class CliDbTest < Minitest::Test
   end
 
   def test_db_options_reject_unknown_flags
-    assert_raises(Prism::Cli::UsageError) { @cli.db_migrate(['--bogus=1']) }
-    assert_raises(Prism::Cli::UsageError) { @cli.db_rollback(['--bogus=1']) }
-    assert_raises(Prism::Cli::UsageError) { @cli.db_status(['--bogus=1']) }
+    assert_raises(Facet::Cli::UsageError) { @cli.db_migrate(['--bogus=1']) }
+    assert_raises(Facet::Cli::UsageError) { @cli.db_rollback(['--bogus=1']) }
+    assert_raises(Facet::Cli::UsageError) { @cli.db_status(['--bogus=1']) }
   end
 end

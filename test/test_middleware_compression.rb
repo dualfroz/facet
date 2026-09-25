@@ -1,5 +1,5 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 require 'zlib'
 require 'stringio'
@@ -14,7 +14,7 @@ class MiddlewareCompressionTest < Minitest::Test
   end
 
   def app_returning(status, headers, body)
-    Prism::Middleware::Compression.new(lambda { |_env| [status, headers, body] })
+    Facet::Middleware::Compression.new(lambda { |_env| [status, headers, body] })
   end
 
   def test_compresses_a_large_buffered_body_when_client_accepts_gzip
@@ -122,21 +122,21 @@ class MiddlewareCompressionTest < Minitest::Test
   def test_streams_a_streaming_body_as_a_single_gzip_stream_chunk_by_chunk
     written_before_producer_returns = nil
     downstream = lambda do |_env|
-      body = Prism::StreamingBody.new do |writer|
+      body = Facet::StreamingBody.new do |writer|
         writer.write("id,title\n")
         writer.write("1,one\n")
         writer.write("2,two\n")
       end
       [200, {'Content-Type' => 'text/csv'}, body]
     end
-    app = Prism::Middleware::Compression.new(downstream)
+    app = Facet::Middleware::Compression.new(downstream)
     env = env_for('GET', '/posts/export', headers: {'Accept-Encoding' => 'gzip'})
     status, headers, body = app.call(env)
 
     assert_equal 200, status
     assert_equal 'gzip', headers['Content-Encoding']
     assert_nil headers['Content-Length']
-    assert_kind_of Prism::StreamingBody, body
+    assert_kind_of Facet::StreamingBody, body
 
     chunks = []
     body.each { |chunk| chunks << chunk }
@@ -146,10 +146,10 @@ class MiddlewareCompressionTest < Minitest::Test
 
   def test_a_second_each_on_the_wrapped_streaming_body_reruns_the_producer_with_a_fresh_gzip_stream
     downstream = lambda do |_env|
-      body = Prism::StreamingBody.new { |writer| writer.write('hello world') }
+      body = Facet::StreamingBody.new { |writer| writer.write('hello world') }
       [200, {'Content-Type' => 'text/plain'}, body]
     end
-    app = Prism::Middleware::Compression.new(downstream)
+    app = Facet::Middleware::Compression.new(downstream)
     env = env_for('GET', '/x', headers: {'Accept-Encoding' => 'gzip'})
     _, _, body = app.call(env)
 

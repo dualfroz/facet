@@ -1,22 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
-# The unit-level race (Queue#claim_next! across raw concurrent processes,
-# test_jobs_queue.rb) and the single-daemon pidfile guard (test_cli_jobs.rb)
-# were both already covered, but nothing exercised the shape a real
-# horizontally-scaled deploy actually takes: several `prism jobs work`
-# daemons - each going through the FULL Cli#jobs_work -> Jobs::Worker ->
-# job#perform -> mark_completed pipeline, each with its OWN pidfile so the
-# single-daemon guard never gets in their way - pointed at the SAME queue
-# file at the same time.
 class CliJobsConcurrentDaemonsTest < Minitest::Test
   DAEMON_COUNT = 5
   JOB_COUNT = 60
 
   def setup
-    @dir = Dir.mktmpdir('prism-cli-jobs-concurrent')
+    @dir = Dir.mktmpdir('facet-cli-jobs-concurrent')
     @queue_path = File.join(@dir, 'db', 'jobs.pstore')
     @claims_dir = File.join(@dir, 'claims')
     @pids_dir = File.join(@dir, 'pids')
@@ -29,7 +21,7 @@ class CliJobsConcurrentDaemonsTest < Minitest::Test
   end
 
   def test_concurrent_daemons_each_process_every_job_exactly_once_with_no_lost_or_duplicated_work
-    queue = Prism::Jobs::Queue.new(@queue_path)
+    queue = Facet::Jobs::Queue.new(@queue_path)
     markers = JOB_COUNT.times.map(&:to_s)
     markers.each { |marker| queue.enqueue(job_class: 'CliJobsConcurrentClaimJob', args: [marker]) }
 
@@ -45,8 +37,8 @@ class CliJobsConcurrentDaemonsTest < Minitest::Test
 
     daemon_script = File.join(@dir, 'daemon.rb')
     File.write(daemon_script, <<~RUBY)
-      require 'prism'
-      cli = Prism::Cli.new(#{@dir.inspect})
+      require 'facet'
+      cli = Facet::Cli.new(#{@dir.inspect})
       cli.jobs_work(
         ['--once', '--file=#{@queue_path}', '--require=#{job_class_file}', "--pidfile=\#{ARGV[0]}"],
         out: File.open(File::NULL, 'w')

@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 
 class WebSocketFrameTest < Minitest::Test
-  Frame = Prism::WebSocket::Frame
+  Frame = Facet::WebSocket::Frame
 
   def decode(bytes)
     Frame.decode(StringIO.new(bytes))
@@ -21,9 +21,6 @@ class WebSocketFrameTest < Minitest::Test
     encoded = Frame.encode(Frame::TEXT, 'client says hi', mask: true)
     frame = decode(encoded)
     assert_equal 'client says hi', frame.payload
-    # the mask key is 4 random bytes right after the length field - a
-    # masked frame for the same payload must not be byte-identical to an
-    # unmasked one (mask bit set, and the payload bytes themselves differ).
     unmasked = Frame.encode(Frame::TEXT, 'client says hi')
     refute_equal unmasked, encoded
   end
@@ -38,7 +35,6 @@ class WebSocketFrameTest < Minitest::Test
   def test_medium_payload_uses_the_16_bit_length_field
     payload = 'x' * 200
     encoded = Frame.encode(Frame::BINARY, payload)
-    # byte 1 (0-indexed) low 7 bits must read 126 - the 16-bit-length marker
     assert_equal 126, encoded.getbyte(1) & 0x7F
     assert_equal payload, decode(encoded).payload
   end
@@ -67,7 +63,7 @@ class WebSocketFrameTest < Minitest::Test
   def test_decode_raises_protocol_error_when_stream_ends_mid_frame
     encoded = Frame.encode(Frame::TEXT, 'truncated me')
     truncated = encoded[0...-3]
-    assert_raises(Prism::WebSocket::ProtocolError) { decode(truncated) }
+    assert_raises(Facet::WebSocket::ProtocolError) { decode(truncated) }
   end
 
   def test_empty_payload_round_trips
@@ -85,20 +81,16 @@ class WebSocketFrameTest < Minitest::Test
     assert_equal 'ok', frame.payload
   end
 
-  # A truthful 64-bit length header is enough to reject the frame - the
-  # payload itself is never even attempted to be read, which is the whole
-  # point of checking before read_exact instead of after.
   def test_decode_rejects_an_oversized_frame_before_reading_its_payload
     header = ((0x80 | Frame::BINARY)).chr + 127.chr + [10_000_000].pack('Q>')
     io = StringIO.new(header)
-    error = assert_raises(Prism::WebSocket::ProtocolError) { Frame.decode(io, max_length: 1024) }
+    error = assert_raises(Facet::WebSocket::ProtocolError) { Frame.decode(io, max_length: 1024) }
     assert_match(/exceeds the 1024 byte limit/, error.message)
-    # RFC 6455 7.4.1: 1009 ("message too big"), not the generic 1002.
     assert_equal 1009, error.code
   end
 
   def test_protocol_error_defaults_to_the_generic_1002_close_code
-    error = assert_raises(Prism::WebSocket::ProtocolError) { decode('') }
+    error = assert_raises(Facet::WebSocket::ProtocolError) { decode('') }
     assert_equal 1002, error.code
   end
 end

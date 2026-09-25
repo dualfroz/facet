@@ -1,19 +1,19 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class CacheHelpersTest < Minitest::Test
   def setup
-    Prism::Cache.store.clear
-    @dir = Dir.mktmpdir('prism-cache-helpers')
+    Facet::Cache.store.clear
+    @dir = Dir.mktmpdir('facet-cache-helpers')
     FileUtils.mkdir_p(File.join(@dir, 'pages'))
-    @view = Prism::View.new(@dir)
+    @view = Facet::View.new(@dir)
   end
 
   def teardown
     FileUtils.remove_entry(@dir)
-    Prism::Cache.store.clear
+    Facet::Cache.store.clear
   end
 
   def write(relative, source)
@@ -24,13 +24,13 @@ class CacheHelpersTest < Minitest::Test
     write('pages/show.erb', '<% cache("greeting") do %><%= greeting %><% end %>')
     result = @view.render('pages/show', locals: { greeting: 'hi' })
     assert_equal 'hi', result
-    assert_equal 'hi', Prism::Cache.store.read('greeting')
+    assert_equal 'hi', Facet::Cache.store.read('greeting')
   end
 
   def test_cache_block_is_not_reevaluated_on_a_hit
     calls = []
     write('pages/show.erb', '<% cache("counter") do %><%= track! %><% end %>')
-    @view = Prism::View.new(@dir, helpers: CounterHelper.new(calls))
+    @view = Facet::View.new(@dir, helpers: CounterHelper.new(calls))
 
     first = @view.render('pages/show')
     second = @view.render('pages/show')
@@ -44,14 +44,14 @@ class CacheHelpersTest < Minitest::Test
     write('pages/show.erb', '<% cache([:sidebar, model]) do %>rendered<% end %>')
     @view.render('pages/show', locals: { model: model })
     assert @view.expand_cache_key([:sidebar, model]) == 'sidebar/posts/7-42'
-    assert_equal 'rendered', Prism::Cache.store.read('sidebar/posts/7-42')
+    assert_equal 'rendered', Facet::Cache.store.read('sidebar/posts/7-42')
   end
 
   def test_expires_in_evicts_the_entry_after_the_given_time
     write('pages/show.erb', '<% cache("temp", expires_in: 0) do %>value<% end %>')
     @view.render('pages/show')
     sleep 0.01
-    assert_nil Prism::Cache.store.read('temp')
+    assert_nil Facet::Cache.store.read('temp')
   end
 
   class CounterHelper

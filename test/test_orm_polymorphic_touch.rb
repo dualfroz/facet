@@ -1,24 +1,24 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmPolymorphicTouchTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-polymorphic-touch-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-polymorphic-touch-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title updated_at])
     @store.create_table(:photos, %w[id caption updated_at reviewed_at])
     @store.create_table(:comments, %w[id body commentable_id commentable_type updated_at])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', as: :commentable, dependent: :destroy
     end
-    photo_class = Class.new(Prism::Orm::Model) do
+    photo_class = Class.new(Facet::Orm::Model) do
       table_name :photos
       has_many :comments, class_name: 'Comment', as: :commentable, dependent: :destroy
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       belongs_to :commentable, polymorphic: true, touch: true
     end

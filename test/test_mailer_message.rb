@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class MailerMessageTest < Minitest::Test
   def setup
-    @message = Prism::Mailer::Message.new
+    @message = Facet::Mailer::Message.new
     @message.from = 'sender@example.com'
     @message.to = 'receiver@example.com'
     @message.subject = 'Test subject'

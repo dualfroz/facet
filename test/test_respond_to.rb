@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class WidgetsController < Prism::Controller
+class WidgetsController < Facet::Controller
   def show
     respond_to do |format|
       format.html { html("<p>widget #{params['id']}</p>") }
@@ -17,7 +17,7 @@ class WidgetsController < Prism::Controller
   end
 end
 
-class WidgetsApp < Prism::Application
+class WidgetsApp < Facet::Application
   get '/widgets/:id', to: 'widgets#show', format: true
   get '/flexible', to: 'widgets#flexible', format: true
 end

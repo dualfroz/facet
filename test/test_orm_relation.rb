@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmRelationTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-relation-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-relation-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:items, %w[id name category])
-    item_class = Class.new(Prism::Orm::Model) do
+    item_class = Class.new(Facet::Orm::Model) do
       table_name :items
     end
     item_class.store = @store

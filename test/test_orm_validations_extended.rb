@@ -1,14 +1,14 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmValidationsExtendedTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-validation-ext-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-validation-ext-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:products, %w[id name price quantity status])
 
-    @product_class = Class.new(Prism::Orm::Model) do
+    @product_class = Class.new(Facet::Orm::Model) do
       table_name :products
       validates_numericality_of :price, greater_than: 0
       validates_numericality_of :quantity, only_integer: true, greater_than_or_equal_to: 0
@@ -65,7 +65,7 @@ class OrmValidationsExtendedTest < Minitest::Test
   end
 
   def test_exclusion_rejects_reserved_values
-    klass = Class.new(Prism::Orm::Model) do
+    klass = Class.new(Facet::Orm::Model) do
       table_name :products
       validates_exclusion_of :name, in: %w[admin root]
     end
@@ -82,7 +82,7 @@ class OrmValidationsExtendedTest < Minitest::Test
   end
 
   def test_custom_validator_block
-    klass = Class.new(Prism::Orm::Model) do
+    klass = Class.new(Facet::Orm::Model) do
       table_name :products
       validate { errors.add(:base, 'always invalid') if name == 'reject-me' }
     end
@@ -93,7 +93,7 @@ class OrmValidationsExtendedTest < Minitest::Test
   end
 
   def test_custom_message_on_numericality
-    klass = Class.new(Prism::Orm::Model) do
+    klass = Class.new(Facet::Orm::Model) do
       table_name :products
       validates_numericality_of :price, greater_than: 0, message: 'needs a positive price'
     end

@@ -1,11 +1,11 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmModelTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-model-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-model-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:widgets, %w[id name price created_at updated_at])
     define_widget_class
   end
@@ -17,7 +17,7 @@ class OrmModelTest < Minitest::Test
 
   def define_widget_class
     store = @store
-    widget_class = Class.new(Prism::Orm::Model) do
+    widget_class = Class.new(Facet::Orm::Model) do
       table_name :widgets
       self.store = store
     end
@@ -39,7 +39,7 @@ class OrmModelTest < Minitest::Test
   end
 
   def test_find_raises_for_missing_record
-    assert_raises(Prism::Orm::RecordNotFound) { Widget.find(9999) }
+    assert_raises(Facet::Orm::RecordNotFound) { Widget.find(9999) }
   end
 
   def test_update_persists_new_values
@@ -53,7 +53,7 @@ class OrmModelTest < Minitest::Test
     id = widget.id
     widget.destroy
     assert widget.destroyed?
-    assert_raises(Prism::Orm::RecordNotFound) { Widget.find(id) }
+    assert_raises(Facet::Orm::RecordNotFound) { Widget.find(id) }
   end
 
   def test_reload_refreshes_attributes
@@ -91,13 +91,13 @@ class OrmModelTest < Minitest::Test
   def test_save_bang_raises_on_invalid_record
     Widget.validates(:name, presence: true)
     widget = Widget.new(name: '')
-    assert_raises(Prism::Orm::RecordInvalid) { widget.save! }
+    assert_raises(Facet::Orm::RecordInvalid) { widget.save! }
   ensure
     Widget.validators.clear
   end
 
   def test_reset_schema_picks_up_columns_added_after_the_model_was_first_used
-    Widget.new # forces load_schema! against the original column set
+    Widget.new
     @store.add_column(:widgets, :sku)
     Widget.reset_schema!
 

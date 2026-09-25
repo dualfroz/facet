@@ -1,20 +1,20 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 require 'tmpdir'
 require 'fileutils'
 
-class CliDbSeedTestWidget < Prism::Orm::Model
+class CliDbSeedTestWidget < Facet::Orm::Model
   table_name 'cli_db_seed_test_widgets'
 end
 
 class CliDbSeedTest < Minitest::Test
   def setup
-    @workdir = Dir.mktmpdir('prism-cli-db-seed')
-    @cli = Prism::Cli.new(@workdir)
+    @workdir = Dir.mktmpdir('facet-cli-db-seed')
+    @cli = Facet::Cli.new(@workdir)
     @database = File.join(@workdir, 'db', 'test.pstore')
     FileUtils.mkdir_p(File.join(@workdir, 'db'))
-    Prism::Orm.connect(@database)
+    Facet::Orm.connect(@database)
     store.create_table('cli_db_seed_test_widgets', %w[id name])
   end
 
@@ -24,7 +24,7 @@ class CliDbSeedTest < Minitest::Test
   end
 
   def store
-    Prism::Orm::Store.new(@database)
+    Facet::Orm::Store.new(@database)
   end
 
   def write_seeds(content, filename = 'db/seeds.rb')
@@ -87,10 +87,6 @@ class CliDbSeedTest < Minitest::Test
     assert_equal ['from --require'], store.all('cli_db_seed_test_widgets').map { |row| row['name'] }
   end
 
-  # `load`, not `require`: a seeds file is a sequence of side effects, not a
-  # class/module definition with meaningful "already loaded" state, so a
-  # second db:seed run must re-execute it rather than silently no-op the way
-  # `require` would once that exact path had already been loaded once.
   def test_db_seed_reruns_the_file_on_every_call_instead_of_requiring_it_once
     write_seeds("CliDbSeedTestWidget.create!(name: 'again')\n")
 
@@ -101,6 +97,6 @@ class CliDbSeedTest < Minitest::Test
   end
 
   def test_db_seed_rejects_unknown_options
-    assert_raises(Prism::Cli::UsageError) { @cli.db_seed(['--bogus=1']) }
+    assert_raises(Facet::Cli::UsageError) { @cli.db_seed(['--bogus=1']) }
   end
 end

@@ -1,32 +1,32 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmNestedAttributesTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-nested-attrs-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-nested-attrs-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title])
     @store.create_table(:comments, %w[id body post_id])
     @store.create_table(:accounts, %w[id owner_id plan])
     @store.create_table(:users, %w[id name])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id', dependent: :destroy
       accepts_nested_attributes_for :comments, allow_destroy: true, reject_if: :all_blank, limit: 3
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id'
       validates :body, presence: true, length: { minimum: 2 }
     end
-    user_class = Class.new(Prism::Orm::Model) do
+    user_class = Class.new(Facet::Orm::Model) do
       table_name :users
       has_one :account, class_name: 'Account', foreign_key: 'owner_id'
       accepts_nested_attributes_for :account
     end
-    account_class = Class.new(Prism::Orm::Model) do
+    account_class = Class.new(Facet::Orm::Model) do
       table_name :accounts
       belongs_to :owner, class_name: 'User', foreign_key: 'owner_id'
       validates :plan, presence: true
@@ -83,7 +83,7 @@ class OrmNestedAttributesTest < Minitest::Test
   end
 
   def test_destroy_flag_is_ignored_without_allow_destroy
-    no_destroy_post_class = Class.new(Prism::Orm::Model) do
+    no_destroy_post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id'
       accepts_nested_attributes_for :comments
@@ -106,7 +106,7 @@ class OrmNestedAttributesTest < Minitest::Test
   end
 
   def test_limit_raises_when_exceeded
-    assert_raises(Prism::Orm::NestedAttributes::TooManyRecords) do
+    assert_raises(Facet::Orm::NestedAttributes::TooManyRecords) do
       Post.create!(title: 'hello', comments_attributes: [{ body: 'a' }, { body: 'b' }, { body: 'c' }, { body: 'd' }])
     end
   end
@@ -156,7 +156,7 @@ class OrmNestedAttributesTest < Minitest::Test
 
   def test_does_not_support_associations_other_than_has_many_or_has_one
     assert_raises(ArgumentError) do
-      Class.new(Prism::Orm::Model) do
+      Class.new(Facet::Orm::Model) do
         table_name :comments
         belongs_to :post, class_name: 'Post', foreign_key: 'post_id'
         accepts_nested_attributes_for :post

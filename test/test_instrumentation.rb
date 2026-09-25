@@ -1,10 +1,10 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'stringio'
 
 class InstrumentationTest < Minitest::Test
   def setup
-    @bus = Prism::Instrumentation::Bus.new
+    @bus = Facet::Instrumentation::Bus.new
   end
 
   def test_instrument_returns_block_value
@@ -42,11 +42,11 @@ class InstrumentationTest < Minitest::Test
 
   def test_regexp_pattern_matches_by_suffix
     events = []
-    @bus.subscribe(/\.prism\z/) { |event| events << event }
-    @bus.instrument('sql.prism') { :ok }
+    @bus.subscribe(/\.facet\z/) { |event| events << event }
+    @bus.instrument('sql.facet') { :ok }
     @bus.instrument('unrelated.event') { :ok }
 
-    assert_equal ['sql.prism'], events.map(&:name)
+    assert_equal ['sql.facet'], events.map(&:name)
   end
 
   def test_nil_pattern_matches_everything
@@ -121,14 +121,14 @@ class InstrumentationTest < Minitest::Test
   end
 
   def test_module_level_bus_is_a_singleton
-    assert_same Prism::Instrumentation.bus, Prism::Instrumentation.bus
+    assert_same Facet::Instrumentation.bus, Facet::Instrumentation.bus
   end
 
   def test_module_level_instrument_and_subscribe_delegate_to_bus
     events = []
-    subscriber = Prism::Instrumentation.subscribe('module.demo') { |event| events << event }
-    Prism::Instrumentation.instrument('module.demo') { :ok }
-    Prism::Instrumentation.unsubscribe(subscriber)
+    subscriber = Facet::Instrumentation.subscribe('module.demo') { |event| events << event }
+    Facet::Instrumentation.instrument('module.demo') { :ok }
+    Facet::Instrumentation.unsubscribe(subscriber)
 
     assert_equal 1, events.size
   end
@@ -136,24 +136,24 @@ end
 
 class InstrumentationLogSubscriberTest < Minitest::Test
   def setup
-    @bus = Prism::Instrumentation::Bus.new
+    @bus = Facet::Instrumentation::Bus.new
     @io = StringIO.new
   end
 
   def test_attach_writes_one_formatted_line_per_event
-    subscribers = attach_to(@bus, @io, patterns: ['sql.prism'])
-    @bus.instrument('sql.prism', operation: 'SELECT', table: 'posts') { :ok }
+    subscribers = attach_to(@bus, @io, patterns: ['sql.facet'])
+    @bus.instrument('sql.facet', operation: 'SELECT', table: 'posts') { :ok }
     subscribers.each { |s| @bus.unsubscribe(s) }
 
     line = @io.string.lines.first
-    assert_match(/sql\.prism \(\d+\.\d ms\)/, line.gsub('ms)', ' ms)'))
+    assert_match(/sql\.facet \(\d+\.\d ms\)/, line.gsub('ms)', ' ms)'))
     assert_match(/operation="SELECT"/, line)
     assert_match(/table="posts"/, line)
   end
 
   def test_attach_ignores_events_not_matching_pattern
-    attach_to(@bus, @io, patterns: ['sql.prism'])
-    @bus.instrument('render_template.prism', identifier: 'posts/index') { :ok }
+    attach_to(@bus, @io, patterns: ['sql.facet'])
+    @bus.instrument('render_template.facet', identifier: 'posts/index') { :ok }
 
     assert_empty @io.string
   end
@@ -167,10 +167,10 @@ class InstrumentationLogSubscriberTest < Minitest::Test
   end
 
   def test_attach_wires_to_the_process_wide_bus
-    subscribers = Prism::Instrumentation::LogSubscriber.attach(@io, patterns: ['demo.singleton'])
-    Prism::Instrumentation.instrument('demo.singleton', a: 1) { :ok }
-    subscribers.each { |s| Prism::Instrumentation.unsubscribe(s) }
-    Prism::Instrumentation.instrument('demo.singleton', a: 2) { :ok }
+    subscribers = Facet::Instrumentation::LogSubscriber.attach(@io, patterns: ['demo.singleton'])
+    Facet::Instrumentation.instrument('demo.singleton', a: 1) { :ok }
+    subscribers.each { |s| Facet::Instrumentation.unsubscribe(s) }
+    Facet::Instrumentation.instrument('demo.singleton', a: 2) { :ok }
 
     assert_equal 1, @io.string.lines.size
     assert_match(/a=1/, @io.string)
@@ -178,10 +178,7 @@ class InstrumentationLogSubscriberTest < Minitest::Test
 
   private
 
-  # Most assertions here only need LogSubscriber's formatting, so they run
-  # against a throwaway Bus instead of the process-wide singleton to stay
-  # isolated from other tests; #attach itself is exercised separately above.
   def attach_to(bus, io, patterns:)
-    patterns.map { |pattern| bus.subscribe(pattern) { |event| io.puts(Prism::Instrumentation::LogSubscriber.format_event(event)) } }
+    patterns.map { |pattern| bus.subscribe(pattern) { |event| io.puts(Facet::Instrumentation::LogSubscriber.format_event(event)) } }
   end
 end

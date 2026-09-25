@@ -1,8 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-class ArticlePagesController < Prism::Controller
+class ArticlePagesController < Facet::Controller
   CURRENT_ETAG = 'article-42-v3'
   CURRENT_MODIFIED = Time.utc(2026, 1, 1, 12, 0, 0)
 
@@ -30,7 +30,7 @@ class ArticlePagesController < Prism::Controller
   end
 end
 
-class ConditionalGetApp < Prism::Application
+class ConditionalGetApp < Facet::Application
   get '/article', to: 'article_pages#show'
   get '/article/strong', to: 'article_pages#show_strong'
   get '/article/edit', to: 'article_pages#edit'

@@ -1,12 +1,12 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class JobsQueueTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-jobs-queue')
-    @queue = Prism::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
+    @dir = Dir.mktmpdir('facet-jobs-queue')
+    @queue = Facet::Jobs::Queue.new(File.join(@dir, 'jobs.pstore'))
   end
 
   def teardown
@@ -70,11 +70,6 @@ class JobsQueueTest < Minitest::Test
     assert_nil @queue.claim_next!
   end
 
-  # Real cross-process race: two OS processes sharing the same PStore file
-  # both try to grab the same batch of jobs at once. #claim_next! selects
-  # and flips status to 'processing' inside one flock'd write transaction,
-  # so the file itself is the arbiter of who wins each job - no job should
-  # ever be claimed by more than one process.
   def test_claim_next_is_safe_across_real_concurrent_processes
     queue_path = File.join(@dir, 'jobs.pstore')
     job_count = 40
@@ -84,8 +79,8 @@ class JobsQueueTest < Minitest::Test
     FileUtils.mkdir_p(claims_dir)
     claimer_script = File.join(@dir, 'claimer.rb')
     File.write(claimer_script, <<~RUBY)
-      require 'prism'
-      queue = Prism::Jobs::Queue.new(#{queue_path.inspect})
+      require 'facet'
+      queue = Facet::Jobs::Queue.new(#{queue_path.inspect})
       claims_dir = #{claims_dir.inspect}
       loop do
         job = queue.claim_next!
@@ -169,7 +164,7 @@ class JobsQueueTest < Minitest::Test
   def test_state_survives_reopening_the_store
     id = @queue.enqueue(job_class: 'PersistedJob', args: [42])
     path = File.join(@dir, 'jobs.pstore')
-    reopened = Prism::Jobs::Queue.new(path)
+    reopened = Facet::Jobs::Queue.new(path)
     job = reopened.next_ready
     assert_equal id, job[:id]
     assert_equal [42], job[:args]

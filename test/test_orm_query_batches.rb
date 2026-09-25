@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmQueryBatchesTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-query-batches')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-query-batches')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:records, %w[id seq])
-    record_class = Class.new(Prism::Orm::Model) do
+    record_class = Class.new(Facet::Orm::Model) do
       table_name :records
     end
     record_class.store = @store

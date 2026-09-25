@@ -1,12 +1,12 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class CliTest < Minitest::Test
   def setup
-    @workdir = Dir.mktmpdir('prism-cli')
-    @cli = Prism::Cli.new(@workdir)
+    @workdir = Dir.mktmpdir('facet-cli')
+    @cli = Facet::Cli.new(@workdir)
   end
 
   def teardown
@@ -27,18 +27,18 @@ class CliTest < Minitest::Test
   def test_new_app_boot_file_references_app_class
     app_dir = @cli.new_app('blog')
     content = File.read(File.join(app_dir, 'app.rb'))
-    assert_includes content, 'class Blog < Prism::Application'
+    assert_includes content, 'class Blog < Facet::Application'
   end
 
   def test_new_app_refuses_to_overwrite_existing_directory
     @cli.new_app('blog')
-    assert_raises(Prism::Cli::UsageError) { @cli.new_app('blog') }
+    assert_raises(Facet::Cli::UsageError) { @cli.new_app('blog') }
   end
 
   def test_generate_migration_for_create_table
     path = @cli.generate_migration('create_posts', ['title:string', 'body:text'])
     content = File.read(path)
-    assert_includes content, 'class CreatePosts < Prism::Orm::Migration'
+    assert_includes content, 'class CreatePosts < Facet::Orm::Migration'
     assert_includes content, 'create_table :posts do |t|'
     assert_includes content, 't.string :title'
     assert_includes content, 't.text :body'
@@ -61,21 +61,21 @@ class CliTest < Minitest::Test
 
   def test_generated_migration_actually_runs
     path = @cli.generate_migration('create_widgets', ['name:string'])
-    store = Prism::Orm::Store.new(File.join(@workdir, 'test.pstore'))
-    Prism::Orm::Migrator.new(store, File.dirname(path)).migrate!
+    store = Facet::Orm::Store.new(File.join(@workdir, 'test.pstore'))
+    Facet::Orm::Migrator.new(store, File.dirname(path)).migrate!
     assert store.table_exists?(:widgets)
     assert_includes store.columns(:widgets), 'name'
   end
 
   def test_generate_model_creates_model_and_migration
     model_path, migration_path = @cli.generate_model('post', ['title:string'])
-    assert_includes File.read(model_path), 'class Post < Prism::Orm::Model'
+    assert_includes File.read(model_path), 'class Post < Facet::Orm::Model'
     assert_includes File.read(migration_path), 'create_table :posts do |t|'
   end
 
-  def test_bin_prism_new_via_subprocess
+  def test_bin_facet_new_via_subprocess
     lib_dir = File.expand_path('../lib', __dir__)
-    bin_path = File.expand_path('../bin/prism', __dir__)
+    bin_path = File.expand_path('../bin/facet', __dir__)
     ruby = File.join(RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name'])
     output = IO.popen([ruby, "-I#{lib_dir}", bin_path, 'new', 'shop'], chdir: @workdir, err: [:child, :out], &:read)
     status = $?.exitstatus
@@ -83,9 +83,9 @@ class CliTest < Minitest::Test
     assert File.file?(File.join(@workdir, 'shop', 'app.rb'))
   end
 
-  def test_bin_prism_reports_usage_error_and_nonzero_exit
+  def test_bin_facet_reports_usage_error_and_nonzero_exit
     lib_dir = File.expand_path('../lib', __dir__)
-    bin_path = File.expand_path('../bin/prism', __dir__)
+    bin_path = File.expand_path('../bin/facet', __dir__)
     ruby = File.join(RbConfig::CONFIG['bindir'], RbConfig::CONFIG['ruby_install_name'])
     output = IO.popen([ruby, "-I#{lib_dir}", bin_path, 'bogus'], chdir: @workdir, err: [:child, :out], &:read)
     status = $?.exitstatus

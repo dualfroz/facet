@@ -1,9 +1,9 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 
 class CacheStoreTest < Minitest::Test
   def setup
-    @store = Prism::Cache::MemoryStore.new
+    @store = Facet::Cache::MemoryStore.new
   end
 
   def test_write_then_read_round_trips
@@ -72,18 +72,18 @@ class CacheStoreTest < Minitest::Test
   end
 
   def test_default_store_is_a_memory_store_singleton
-    assert_same Prism::Cache.store, Prism::Cache.store
-    assert_instance_of Prism::Cache::MemoryStore, Prism::Cache.store
+    assert_same Facet::Cache.store, Facet::Cache.store
+    assert_instance_of Facet::Cache::MemoryStore, Facet::Cache.store
   end
 
   def test_unbounded_store_never_evicts
-    store = Prism::Cache::MemoryStore.new
+    store = Facet::Cache::MemoryStore.new
     50.times { |i| store.write("k#{i}", i) }
     assert_equal 50, store.size
   end
 
   def test_max_size_evicts_the_least_recently_used_entry_on_write
-    store = Prism::Cache::MemoryStore.new(max_size: 2)
+    store = Facet::Cache::MemoryStore.new(max_size: 2)
     store.write('a', 1)
     store.write('b', 2)
     store.write('c', 3)
@@ -94,10 +94,10 @@ class CacheStoreTest < Minitest::Test
   end
 
   def test_reading_a_key_protects_it_from_eviction
-    store = Prism::Cache::MemoryStore.new(max_size: 2)
+    store = Facet::Cache::MemoryStore.new(max_size: 2)
     store.write('a', 1)
     store.write('b', 2)
-    store.read('a') # bump 'a' to most-recently-used, 'b' is now the LRU one
+    store.read('a')
     store.write('c', 3)
     assert_equal 1, store.read('a')
     assert_nil store.read('b')
@@ -105,7 +105,7 @@ class CacheStoreTest < Minitest::Test
   end
 
   def test_rewriting_an_existing_key_does_not_grow_the_store
-    store = Prism::Cache::MemoryStore.new(max_size: 2)
+    store = Facet::Cache::MemoryStore.new(max_size: 2)
     store.write('a', 1)
     store.write('b', 2)
     store.write('a', 'updated')

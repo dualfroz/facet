@@ -1,18 +1,8 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'support'
 
-# Session 52's documented debt: Cors and ConditionalGet were each tested in
-# isolation, but never together - and the two subsystems interact in a way
-# that is easy to get wrong. Prism::Middleware::Cors stamps headers onto
-# whatever [status, headers, body] the app below it returns
-# (lib/prism/middleware/cors.rb#call), without special-casing any status
-# code, and Controller#halt(304, '') (used by fresh_when/stale?) short-
-# circuits rendering but still returns through the SAME response path as a
-# normal 200 - so a cross-origin conditional GET that turns out fresh
-# should still come back as a CORS-tagged 304 with an empty body, not lose
-# its Access-Control-* headers just because nothing was actually rendered.
-class CorsArticlesController < Prism::Controller
+class CorsArticlesController < Facet::Controller
   ETAG = 'cors-article-v1'.freeze
 
   def show
@@ -21,7 +11,7 @@ class CorsArticlesController < Prism::Controller
   end
 end
 
-class CorsConditionalGetApp < Prism::Application
+class CorsConditionalGetApp < Facet::Application
   get '/api/articles/1', to: 'cors_articles#show'
 end
 
@@ -32,18 +22,18 @@ class CorsConditionalGetTest < Minitest::Test
   FRESH_ETAG = 'W/"' + Digest::SHA1.hexdigest(CorsArticlesController::ETAG) + '"'
 
   def setup
-    Prism::Cors.reset!
-    Prism::Cors.configure do |config|
+    Facet::Cors.reset!
+    Facet::Cors.configure do |config|
       config.allow do
         origins ORIGIN
         resource '/api/*', methods: %w[GET]
       end
     end
-    @app = Prism::Middleware::Cors.new(CorsConditionalGetApp)
+    @app = Facet::Middleware::Cors.new(CorsConditionalGetApp)
   end
 
   def teardown
-    Prism::Cors.reset!
+    Facet::Cors.reset!
   end
 
   def call(headers)

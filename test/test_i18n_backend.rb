@@ -1,10 +1,10 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class I18nBackendTest < Minitest::Test
   def setup
-    @backend = Prism::I18n::Backend.new
+    @backend = Facet::I18n::Backend.new
   end
 
   def test_lookup_returns_nil_for_unknown_key

@@ -1,25 +1,25 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmCounterCacheTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-counter-cache-store')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-counter-cache-store')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:posts, %w[id title comments_count annotations])
     @store.create_table(:comments, %w[id body post_id deleted_at])
     @store.create_table(:notes, %w[id body post_id])
 
-    post_class = Class.new(Prism::Orm::Model) do
+    post_class = Class.new(Facet::Orm::Model) do
       table_name :posts
       has_many :comments, class_name: 'Comment', foreign_key: 'post_id'
     end
-    comment_class = Class.new(Prism::Orm::Model) do
+    comment_class = Class.new(Facet::Orm::Model) do
       table_name :comments
       acts_as_paranoid
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id', counter_cache: true
     end
-    note_class = Class.new(Prism::Orm::Model) do
+    note_class = Class.new(Facet::Orm::Model) do
       table_name :notes
       belongs_to :post, class_name: 'Post', foreign_key: 'post_id', counter_cache: :annotations
     end
@@ -82,8 +82,6 @@ class OrmCounterCacheTest < Minitest::Test
 
   def test_creating_without_an_owner_does_not_touch_any_counter
     Comment.create!(body: 'orphan', post_id: nil)
-    # No exception, and no post exists to have been bumped - the point of
-    # this test is simply that the after_create hook tolerates a nil owner.
   end
 
   def test_unrelated_update_does_not_double_count

@@ -1,16 +1,16 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 require 'fileutils'
 
 class MiddlewareStaticTest < Minitest::Test
   def setup
-    @root = Dir.mktmpdir('prism-static-root')
+    @root = Dir.mktmpdir('facet-static-root')
     File.write(File.join(@root, 'index.html'), '<h1>static</h1>')
     FileUtils.mkdir_p(File.join(@root, 'css'))
     File.write(File.join(@root, 'css', 'app.css'), 'body { color: red; }')
     @downstream = ->(env) { [404, {}, ["app: #{env['PATH_INFO']}"]] }
-    @app = Prism::Middleware::Static.new(@downstream, root: @root)
+    @app = Facet::Middleware::Static.new(@downstream, root: @root)
   end
 
   def teardown

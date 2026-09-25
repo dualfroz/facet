@@ -1,13 +1,13 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'tmpdir'
 
 class OrmQueryScopesTest < Minitest::Test
   def setup
-    @dir = Dir.mktmpdir('prism-query-scopes')
-    @store = Prism::Orm::Store.new(File.join(@dir, 'test.pstore'))
+    @dir = Dir.mktmpdir('facet-query-scopes')
+    @store = Facet::Orm::Store.new(File.join(@dir, 'test.pstore'))
     @store.create_table(:articles, %w[id title published views])
-    @article_class = Class.new(Prism::Orm::Model) do
+    @article_class = Class.new(Facet::Orm::Model) do
       table_name :articles
       scope :published, -> { where(published: true) }
       scope :popular, ->(threshold) { where(views: { gte: threshold }) }
@@ -41,12 +41,12 @@ class OrmQueryScopesTest < Minitest::Test
   end
 
   def test_scopes_return_relation_not_array
-    assert_kind_of Prism::Orm::Relation, Article.published
+    assert_kind_of Facet::Orm::Relation, Article.published
   end
 
   def test_default_scope_applies_to_all_and_where
     Object.send(:remove_const, :Article)
-    scoped_class = Class.new(Prism::Orm::Model) do
+    scoped_class = Class.new(Facet::Orm::Model) do
       table_name :articles
       default_scope { where(published: true) }
     end
@@ -60,7 +60,7 @@ class OrmQueryScopesTest < Minitest::Test
 
   def test_unscoped_bypasses_default_scope
     Object.send(:remove_const, :Article)
-    scoped_class = Class.new(Prism::Orm::Model) do
+    scoped_class = Class.new(Facet::Orm::Model) do
       table_name :articles
       default_scope { where(published: true) }
     end

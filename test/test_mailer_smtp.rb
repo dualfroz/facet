@@ -1,11 +1,7 @@
 require 'minitest/autorun'
-require 'prism'
+require 'facet'
 require 'socket'
 
-# A minimal but real SMTP server: enough of RFC 5321 (EHLO/MAIL FROM/RCPT
-# TO/DATA/QUIT) for Ruby's Net::SMTP client to complete a full session
-# against it over an actual TCP socket. Used to prove Prism::Mailer's :smtp
-# delivery path really speaks SMTP, not just that it calls into Net::SMTP.
 class FakeSmtpServer
   attr_reader :commands, :data
 
@@ -89,27 +85,27 @@ end
 
 class MailerSmtpTest < Minitest::Test
   def setup
-    @previous_method = Prism::Mailer.delivery_method
-    @previous_settings = Prism::Mailer.smtp_settings
+    @previous_method = Facet::Mailer.delivery_method
+    @previous_settings = Facet::Mailer.smtp_settings
   end
 
   def teardown
-    Prism::Mailer.delivery_method = @previous_method
-    Prism::Mailer.smtp_settings = @previous_settings
+    Facet::Mailer.delivery_method = @previous_method
+    Facet::Mailer.smtp_settings = @previous_settings
   end
 
   def test_smtp_delivery_speaks_real_smtp_to_a_live_server_over_tcp
     server = FakeSmtpServer.new.start
-    Prism::Mailer.delivery_method = :smtp
-    Prism::Mailer.smtp_settings = { address: '127.0.0.1', port: server.port, domain: 'test.local' }
+    Facet::Mailer.delivery_method = :smtp
+    Facet::Mailer.smtp_settings = { address: '127.0.0.1', port: server.port, domain: 'test.local' }
 
-    message = Prism::Mailer::Message.new
+    message = Facet::Mailer::Message.new
     message.from = 'sender@example.com'
     message.to = 'receiver@example.com'
     message.subject = 'Live SMTP test'
     message.text_body = 'delivered over a real socket'
 
-    Prism::Mailer.deliver!(message)
+    Facet::Mailer.deliver!(message)
     server.stop
 
     assert(server.commands.any? { |c| c =~ /\AMAIL FROM:<sender@example\.com>/i })
@@ -119,26 +115,26 @@ class MailerSmtpTest < Minitest::Test
   end
 
   def test_smtp_delivery_raises_when_no_server_is_listening
-    Prism::Mailer.delivery_method = :smtp
-    Prism::Mailer.smtp_settings = { address: '127.0.0.1', port: 1, domain: 'test.local' }
+    Facet::Mailer.delivery_method = :smtp
+    Facet::Mailer.smtp_settings = { address: '127.0.0.1', port: 1, domain: 'test.local' }
 
-    message = Prism::Mailer::Message.new
+    message = Facet::Mailer::Message.new
     message.from = 'sender@example.com'
     message.to = 'receiver@example.com'
     message.subject = 'Unreachable'
     message.text_body = 'never sent'
 
-    assert_raises(StandardError) { Prism::Mailer.deliver!(message) }
+    assert_raises(StandardError) { Facet::Mailer.deliver!(message) }
   end
 
   def test_unknown_delivery_method_raises_immediately
-    Prism::Mailer.delivery_method = :carrier_pigeon
-    message = Prism::Mailer::Message.new
+    Facet::Mailer.delivery_method = :carrier_pigeon
+    message = Facet::Mailer::Message.new
     message.from = 'sender@example.com'
     message.to = 'receiver@example.com'
     message.subject = 'x'
     message.text_body = 'x'
 
-    assert_raises(ArgumentError) { Prism::Mailer.deliver!(message) }
+    assert_raises(ArgumentError) { Facet::Mailer.deliver!(message) }
   end
 end
